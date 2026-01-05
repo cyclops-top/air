@@ -10,9 +10,19 @@ use percent_encoding::percent_decode_str;
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
-#[derive(Clone)]
+use std::collections::VecDeque;
+use std::sync::Mutex;
+
+#[derive(Default)]
+pub struct Stats {
+    pub total_files: std::sync::atomic::AtomicU64,
+    pub total_bytes: std::sync::atomic::AtomicU64,
+    pub logs: Mutex<VecDeque<String>>,
+}
+
 pub struct AppState {
     pub root_path: PathBuf,
+    pub stats: Arc<Stats>,
 }
 
 pub async fn handle_request(
@@ -45,6 +55,10 @@ pub async fn handle_request(
         // List directory
         return list_directory(&abs_path, &decoded_path, headers).await;
     } else {
+        // Update stats
+        state.stats.total_files.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        state.stats.total_bytes.fetch_add(metadata.len(), std::sync::atomic::Ordering::Relaxed);
+
         // Serve file
         // ServeFile handles Range requests automatically.
         match ServeFile::new(abs_path).oneshot(req).await {
@@ -55,6 +69,12 @@ pub async fn handle_request(
             }
         }
     }
+}
+
+const FAVICON_SVG: &[u8] = include_bytes!("../docs/favicon.svg");
+
+pub async fn favicon() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "image/svg+xml")], FAVICON_SVG)
 }
 
 async fn list_directory(
@@ -129,5 +149,25 @@ async fn list_directory(
         Json(listing).into_response()
     } else {
         Html(view::render_html(&listing)).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::header;
+    use axum::body::to_bytes;
+
+    #[tokio::test]
+    async fn test_favicon() {
+        let response = favicon().await.into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "image/svg+xml"
+        );
+        
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(body, &FAVICON_SVG[..]);
     }
 }

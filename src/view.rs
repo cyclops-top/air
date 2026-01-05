@@ -20,6 +20,7 @@ pub struct DirectoryListing {
 pub fn render_html(listing: &DirectoryListing) -> String {
     let mut html = String::new();
     html.push_str("<!DOCTYPE html><html><head><meta charset='utf-8'>");
+    html.push_str("<link rel='icon' type='image/svg+xml' href='/favicon.ico'>");
     html.push_str("<title>Air - ");
     html.push_str(&listing.current_path);
     html.push_str("</title>");
@@ -72,7 +73,7 @@ pub fn render_html(listing: &DirectoryListing) -> String {
     html
 }
 
-fn format_size(bytes: u64) -> String {
+pub fn format_size(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = KB * 1024;
     const GB: u64 = MB * 1024;
