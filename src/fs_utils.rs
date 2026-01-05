@@ -71,7 +71,7 @@ mod tests {
         // request ../../etc/passwd (assuming we are deep enough or just trying to go up)
         // Since root is temp, .. goes to /tmp (usually). 
         // Let's try to access parent of root.
-        let parent = root.parent().unwrap();
+        let _parent = root.parent().unwrap();
         let result = sanitize_path(&root, "../");
         
         // Should fail because parent is outside root
