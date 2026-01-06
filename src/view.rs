@@ -95,6 +95,51 @@ pub fn format_size(bytes: u64) -> String {
     }
 }
 
+pub fn format_duration(duration: std::time::Duration) -> String {
+    let secs = duration.as_secs();
+    let hours = secs / 3600;
+    let minutes = (secs % 3600) / 60;
+    let seconds = secs % 60;
+    format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+}
+
+pub fn format_range(range: &str) -> String {
+    // range is usually "start-end" or "start-"
+    let parts: Vec<&str> = range.split('-').collect();
+    if parts.len() != 2 {
+        return range.to_string();
+    }
+
+    let format_part = |p: &str| -> String {
+        if let Ok(bytes) = p.parse::<u64>() {
+            const KB: u64 = 1024;
+            const MB: u64 = KB * 1024;
+            const GB: u64 = MB * 1024;
+
+            if bytes >= GB {
+                format!("{:.1}G", bytes as f64 / GB as f64)
+            } else if bytes >= MB {
+                format!("{:.1}M", bytes as f64 / MB as f64)
+            } else if bytes >= KB {
+                format!("{:.1}K", bytes as f64 / KB as f64)
+            } else {
+                bytes.to_string()
+            }
+        } else {
+            p.to_string()
+        }
+    };
+
+    let start = format_part(parts[0]);
+    let end = format_part(parts[1]);
+    
+    if end.is_empty() {
+        format!("{}-", start)
+    } else {
+        format!("{}-{}", start, end)
+    }
+}
+
 fn render_breadcrumbs(path: &str) -> String {
     let mut html = String::new();
     let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
@@ -129,5 +174,38 @@ mod tests {
     fn test_breadcrumbs_deep() {
         let html = render_breadcrumbs("/Movies/Action");
         assert_eq!(html, "<a href='/'>Home</a><span class='separator'>/</span><a href='/Movies'>Movies</a><span class='separator'>/</span><a href='/Movies/Action'>Action</a>");
+    }
+
+    #[test]
+    fn test_format_duration() {
+        assert_eq!(
+            format_duration(std::time::Duration::from_secs(0)),
+            "00:00:00"
+        );
+        assert_eq!(
+            format_duration(std::time::Duration::from_secs(59)),
+            "00:00:59"
+        );
+        assert_eq!(
+            format_duration(std::time::Duration::from_secs(60)),
+            "00:01:00"
+        );
+        assert_eq!(
+            format_duration(std::time::Duration::from_secs(3600)),
+            "01:00:00"
+        );
+        assert_eq!(
+            format_duration(std::time::Duration::from_secs(3661)),
+            "01:01:01"
+        );
+    }
+
+    #[test]
+    fn test_format_range() {
+        assert_eq!(format_range("0-1023"), "0-1023");
+        assert_eq!(format_range("0-1024"), "0-1.0K");
+        assert_eq!(format_range("1048576-2097152"), "1.0M-2.0M");
+        assert_eq!(format_range("1048576-"), "1.0M-");
+        assert_eq!(format_range("abc-def"), "abc-def");
     }
 }

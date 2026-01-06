@@ -4,32 +4,32 @@
 TBD - created by archiving change implement-tui-dashboard. Update Purpose after archive.
 ## Requirements
 ### Requirement: 全屏 TUI 仪表盘
-TUI 仪表盘 MUST 实时显示网络访问地址。
+TUI 仪表盘 MUST 提供高质量、易读且已解码的实时日志路径显示。
 
-#### Scenario: 仪表盘布局更新
-当进入 TUI 模式时：
-- 屏幕顶部 MUST 移除 `Local` 地址行。
-- MUST 显示统一的 `Network Address`，包含主机名和局域网 IP。
+#### Scenario: 路径展示解码
+在 TUI 日志窗口中：
+- 路径字符串 MUST 经过 URL 解码处理。
+- 例如：原始请求路径 `/My%20Folder` MUST 显示为 `/My Folder`。
 
 ### Requirement: 退出后统计展示
-在 TUI 模式结束后，程序 MUST 将运行统计数据打印到常规标准输出。
+程序退出后的统计摘要 MUST 包含总运行时长。
 
-#### Scenario: 打印摘要
-程序关闭后，控制台最后输出的内容 MUST 包含：
-- 总计下载文件数。
-- 总计下载字节量（格式化后的）。
+#### Scenario: 打印总运行时长
+程序关闭后，控制台最后输出的 `Summary of this session` MUST 包含：
+- `  ➜  Total uptime:    <duration>`
 
 ### Requirement: TUI 二维码展示
-TUI 仪表盘 MUST 在显著位置（如顶部 Header）展示一个二维码，用于快速访问。
+TUI 仪表盘 MUST 根据终端能力智能展示高清二维码。
 
-#### Scenario: 动态二维码生成
-当程序在 TUI 模式下启动时：
-- 程序 MUST 根据当前的 `Network` 访问地址生成对应的二维码。
-- 二维码 MUST 使用终端可显示的 Unicode 字符渲染。
+#### Scenario: 基于图形协议的渲染
+当终端支持 Sixel, Kitty 或 iTerm2 图形协议时：
+- 系统 MUST 将二维码渲染为像素级图片。
+- 二维码 MUST 清晰、无形变且可被扫描。
 
-#### Scenario: 布局一致性
-- 二维码 SHOULD 与 `System Status` 文本并排显示。
-- 即使窗口高度受限，二维码也 MUST 尽可能保持显示，以便手机扫码。
+#### Scenario: 自动隐藏
+当终端不支持任何已知图形协议时：
+- 系统 MUST 隐藏二维码区域。
+- 仪表盘布局 MUST 自动调整，将原本留给二维码的空间用于展示其他系统信息。
 
 ### Requirement: 目录列表页面路径展示
 Web UI MUST 使用可点击的面包屑（Breadcrumbs）展示当前路径，取代静态文本。

@@ -47,9 +47,9 @@ async fn main() -> anyhow::Result<()> {
     let (app_state, used_port) = server::start(cli.port, root_path, cli.https, lan_ip).await?;
 
     // 4. Setup TUI (only if TTY)
-    let is_tty = crossterm::tty::IsTty::is_tty(&std::io::stdout())
-        && crossterm::tty::IsTty::is_tty(&std::io::stdin());
-
+    let is_tty = crossterm::tty::IsTty::is_tty(&std::io::stdout()) && 
+                 crossterm::tty::IsTty::is_tty(&std::io::stdin());
+    
     if is_tty {
         crossterm::terminal::enable_raw_mode()?;
         let mut stdout = std::io::stdout();
@@ -57,18 +57,22 @@ async fn main() -> anyhow::Result<()> {
         let backend = ratatui::backend::CrosstermBackend::new(stdout);
         let mut terminal = ratatui::Terminal::new(backend)?;
 
+        let picker = ratatui_image::picker::Picker::from_query_stdio().ok();
+
         let mut ui_state = dashboard::DashboardState {
             scroll_offset: 0,
             lan_ip: lan_ip.to_string(),
             port: used_port,
             hostname: host_name,
+            picker,
+            image_state: None,
         };
 
         use tokio_stream::StreamExt;
         let mut event_reader = crossterm::event::EventStream::new();
 
         loop {
-            terminal.draw(|f| dashboard::render(f, &app_state, &ui_state))?;
+            terminal.draw(|f| dashboard::render(f, &app_state, &mut ui_state))?;
 
             tokio::select! {
                 event = event_reader.next() => {
@@ -114,7 +118,7 @@ async fn main() -> anyhow::Result<()> {
         }
         println!();
         println!("Non-interactive mode: Waiting for signal (Ctrl-C) to stop...");
-
+        
         tokio::signal::ctrl_c().await?;
     }
 
@@ -123,19 +127,15 @@ async fn main() -> anyhow::Result<()> {
     println!("Summary of this session:");
     println!(
         "  ➜  Files downloaded: {}",
-        app_state
-            .stats
-            .total_files
-            .load(std::sync::atomic::Ordering::Relaxed)
+        app_state.stats.total_files.load(std::sync::atomic::Ordering::Relaxed)
     );
     println!(
         "  ➜  Total volume:    {}",
-        view::format_size(
-            app_state
-                .stats
-                .total_bytes
-                .load(std::sync::atomic::Ordering::Relaxed)
-        )
+        view::format_size(app_state.stats.total_bytes.load(std::sync::atomic::Ordering::Relaxed))
+    );
+    println!(
+        "  ➜  Total uptime:    {}",
+        view::format_duration(app_state.stats.start_time.elapsed())
     );
 
     Ok(())
