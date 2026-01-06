@@ -1,3 +1,4 @@
+use crate::handlers::AppState;
 use axum::{
     extract::{ConnectInfo, Request, State},
     middleware::Next,
@@ -5,7 +6,6 @@ use axum::{
 };
 use chrono::Local;
 use std::{net::SocketAddr, sync::Arc, time::Instant};
-use crate::handlers::AppState;
 
 pub async fn log_request(
     State(state): State<Arc<AppState>>,
