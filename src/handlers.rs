@@ -1,12 +1,12 @@
+use crate::{fs_utils, view};
 use axum::{
     extract::{Request, State},
-    http::{header, StatusCode, HeaderMap},
-    response::{Html, IntoResponse, Response, Json},
+    http::{header, HeaderMap, StatusCode},
+    response::{Html, IntoResponse, Json, Response},
 };
+use percent_encoding::percent_decode_str;
 use std::path::PathBuf;
 use std::sync::Arc;
-use crate::{fs_utils, view};
-use percent_encoding::percent_decode_str;
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
@@ -23,6 +23,7 @@ pub struct Stats {
 pub struct AppState {
     pub root_path: PathBuf,
     pub stats: Arc<Stats>,
+    pub enable_https: bool,
 }
 
 pub async fn handle_request(
@@ -32,7 +33,7 @@ pub async fn handle_request(
 ) -> Response {
     // We need to clone the path logic to avoid borrowing req while we need to move it later.
     let uri_path = req.uri().path().to_string();
-    
+
     // Decode path
     let decoded_path = match percent_decode_str(&uri_path).decode_utf8() {
         Ok(p) => p.to_string(),
@@ -56,8 +57,14 @@ pub async fn handle_request(
         return list_directory(&abs_path, &decoded_path, headers).await;
     } else {
         // Update stats
-        state.stats.total_files.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        state.stats.total_bytes.fetch_add(metadata.len(), std::sync::atomic::Ordering::Relaxed);
+        state
+            .stats
+            .total_files
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        state
+            .stats
+            .total_bytes
+            .fetch_add(metadata.len(), std::sync::atomic::Ordering::Relaxed);
 
         // Serve file
         // ServeFile handles Range requests automatically.
@@ -65,7 +72,11 @@ pub async fn handle_request(
             Ok(res) => res.into_response(),
             Err(err) => {
                 // Log error if needed, for now return 500
-                (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to serve file: {}", err)).into_response()
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to serve file: {}", err),
+                )
+                    .into_response()
             }
         }
     }
@@ -78,52 +89,50 @@ pub async fn favicon() -> impl IntoResponse {
 }
 
 async fn list_directory(
-    abs_path: &std::path::Path, 
+    abs_path: &std::path::Path,
     request_path: &str,
-    headers: HeaderMap
+    headers: HeaderMap,
 ) -> Response {
     let mut items = Vec::new();
-    
+
     // Read dir
     let read_dir = match std::fs::read_dir(abs_path) {
         Ok(rd) => rd,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    for entry in read_dir {
-        if let Ok(entry) = entry {
-            let name = entry.file_name().to_string_lossy().to_string();
-            
-            // Hidden file filter
-            if name.starts_with('.') {
-                continue;
-            }
+    for entry in read_dir.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
 
-            let meta = entry.metadata().ok();
-            let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
-            let is_dir = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
-            
-            // Modification time
-            // Simple string format
-            let mod_time = if let Some(m) = meta {
-                 if let Ok(t) = m.modified() {
-                     // Convert SystemTime to string using chrono
-                     let dt: chrono::DateTime<chrono::Local> = t.into();
-                     dt.to_rfc3339()
-                 } else {
-                     "".to_string()
-                 }
+        // Hidden file filter
+        if name.starts_with('.') {
+            continue;
+        }
+
+        let meta = entry.metadata().ok();
+        let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+        let is_dir = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+
+        // Modification time
+        // Simple string format
+        let mod_time = if let Some(m) = meta {
+            if let Ok(t) = m.modified() {
+                // Convert SystemTime to string using chrono
+                let dt: chrono::DateTime<chrono::Local> = t.into();
+                dt.to_rfc3339()
             } else {
                 "".to_string()
-            };
+            }
+        } else {
+            "".to_string()
+        };
 
-            items.push(view::FileEntry {
-                name,
-                is_dir,
-                size,
-                mod_time,
-            });
-        }
+        items.push(view::FileEntry {
+            name,
+            is_dir,
+            size,
+            mod_time,
+        });
     }
 
     // Sort: Directories first, then files
@@ -143,8 +152,11 @@ async fn list_directory(
     };
 
     // Check Accept header
-    let accept = headers.get(header::ACCEPT).and_then(|v| v.to_str().ok()).unwrap_or("");
-    
+    let accept = headers
+        .get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
     if accept.contains("application/json") {
         Json(listing).into_response()
     } else {
@@ -155,8 +167,8 @@ async fn list_directory(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::header;
     use axum::body::to_bytes;
+    use axum::http::header;
 
     #[tokio::test]
     async fn test_favicon() {
@@ -166,7 +178,7 @@ mod tests {
             response.headers().get(header::CONTENT_TYPE).unwrap(),
             "image/svg+xml"
         );
-        
+
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         assert_eq!(body, &FAVICON_SVG[..]);
     }
