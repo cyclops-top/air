@@ -74,3 +74,44 @@ Web UI 的 HTML 页面 MUST 显式引用网站图标。
 - 服务器 MUST 开启 HTTP/2 特性。
 - 浏览器在处理“批量请求”（如并发加载多个图标或小文件）时应能共享单一连接。
 
+### Requirement: HTTP 实例摘要 (Digest)
+服务器 MUST 为下载的文件提供应用层完整性校验。
+
+#### Scenario: 响应包含 SHA-256
+当用户成功请求一个文件时：
+- 响应头 MUST 包含 `Digest` 字段。
+- 格式 MUST 符合 RFC 3230/5843 标准（如 `SHA-256=...`）。
+- 摘要值 MUST 是文件内容的有效哈希。
+
+#### Scenario: 缓存与自动失效
+- 服务器 SHOULD 在内存中缓存已计算的摘要以提升性能。
+- 如果文件的大小或最后修改时间发生变化，服务器 MUST 重新计算摘要，严禁返回过期的哈希值。
+
+#### Scenario: 分段下载中的摘要
+- 当响应为 `206 Partial Content` (Range 请求) 时，`Digest` 头部 MUST 依然包含**完整文件**的摘要，而非仅该分段的摘要。
+
+### Requirement: 语义化请求日志
+服务器 MUST 仅针对核心用户行为记录语义化日志。
+
+#### Scenario: 过滤 HEAD 请求
+当服务器接收到 `HEAD` 类型的请求时：
+- 该请求 MUST 不会被记录到 TUI 日志窗口中。
+
+#### Scenario: 仅限 GET 请求记录
+- 只有当请求方法为 `GET` 时，系统 MUST 才会尝试记录 `OPEN DIR` 或 `DOWNLOAD` 等语义化日志。
+
+### Requirement: 高效缓存与校验
+服务器 MUST 支持 HTTP 标准的缓存协商机制。
+
+#### Scenario: ETag 生成与验证
+当请求文件时：
+- 服务器 MUST 返回 `ETag` 头部，值由文件的 SHA-256 摘要生成。
+- 如果客户端发送了匹配的 `If-None-Match` 头部：
+    - 服务器 MUST 返回 `304 Not Modified`。
+    - 响应体 MUST 为空。
+
+#### Scenario: 续传一致性校验
+在使用 `Range` 请求时：
+- 服务器 MUST 始终返回 `ETag` 头部。
+- 客户端可以使用该 ETag 确保多个分段属于同一个文件版本。
+

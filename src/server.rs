@@ -35,6 +35,7 @@ pub async fn start(
         root_path: root,
         stats: stats.clone(),
         enable_https,
+        digest_cache: dashmap::DashMap::new(),
     });
 
     let app = Router::new()

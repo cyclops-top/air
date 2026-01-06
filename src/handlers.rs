@@ -13,17 +13,52 @@ use tower_http::services::ServeFile;
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
-#[derive(Default)]
+#[derive(Clone, Copy, Debug)]
+pub enum LogAction {
+    OpenDir,
+    DownloadFile,
+    Favicon,
+}
+
+pub struct LogEntry {
+    pub time: String,
+    pub ip: String,
+    pub action: LogAction,
+    pub duration: std::time::Duration,
+    pub path: String,
+    pub is_success: bool,
+    pub range: Option<String>,
+}
+
 pub struct Stats {
     pub total_files: std::sync::atomic::AtomicU64,
     pub total_bytes: std::sync::atomic::AtomicU64,
-    pub logs: Mutex<VecDeque<String>>,
+    pub logs: Mutex<VecDeque<LogEntry>>,
+    pub start_time: std::time::Instant,
+}
+
+impl Default for Stats {
+    fn default() -> Self {
+        Self {
+            total_files: std::sync::atomic::AtomicU64::new(0),
+            total_bytes: std::sync::atomic::AtomicU64::new(0),
+            logs: Mutex::new(VecDeque::new()),
+            start_time: std::time::Instant::now(),
+        }
+    }
+}
+
+pub struct DigestEntry {
+    pub hash: String, // Base64 encoded SHA-256
+    pub mtime: std::time::SystemTime,
+    pub size: u64,
 }
 
 pub struct AppState {
     pub root_path: PathBuf,
     pub stats: Arc<Stats>,
     pub enable_https: bool,
+    pub digest_cache: dashmap::DashMap<PathBuf, DigestEntry>,
 }
 
 pub async fn handle_request(
@@ -54,8 +89,53 @@ pub async fn handle_request(
 
     if metadata.is_dir() {
         // List directory
-        return list_directory(&abs_path, &decoded_path, headers).await;
+        let mut res = list_directory(&abs_path, &decoded_path, headers).await;
+        res.extensions_mut().insert(LogAction::OpenDir);
+        return res;
     } else {
+        // 1. Calculate or Retrieve Digest
+        let mtime = metadata
+            .modified()
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        let size = metadata.len();
+
+        let hash = if let Some(entry) = state.digest_cache.get(&abs_path) {
+            if entry.mtime == mtime && entry.size == size {
+                entry.hash.clone()
+            } else {
+                drop(entry);
+                let h = fs_utils::calculate_sha256(&abs_path).await.unwrap_or_default();
+                state.digest_cache.insert(
+                    abs_path.clone(),
+                    DigestEntry {
+                        hash: h.clone(),
+                        mtime,
+                        size,
+                    },
+                );
+                h
+            }
+        } else {
+            let h = fs_utils::calculate_sha256(&abs_path).await.unwrap_or_default();
+            state.digest_cache.insert(
+                abs_path.clone(),
+                DigestEntry {
+                    hash: h.clone(),
+                    mtime,
+                    size,
+                },
+            );
+            h
+        };
+
+        // 2. ETag validation
+        let etag = format!("\"{}\"", hash);
+        if let Some(if_none_match) = headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) {
+            if if_none_match == etag {
+                return StatusCode::NOT_MODIFIED.into_response();
+            }
+        }
+
         // Update stats
         state
             .stats
@@ -68,24 +148,37 @@ pub async fn handle_request(
 
         // Serve file
         // ServeFile handles Range requests automatically.
-        match ServeFile::new(abs_path).oneshot(req).await {
+        let mut res = match ServeFile::new(abs_path).oneshot(req).await {
             Ok(res) => res.into_response(),
-            Err(err) => {
-                // Log error if needed, for now return 500
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to serve file: {}", err),
-                )
-                    .into_response()
+            Err(err) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to serve file: {}", err),
+            )
+                .into_response(),
+        };
+
+        // 3. Inject Digest and ETag Headers
+        if !hash.is_empty() {
+            if let Ok(val) = header::HeaderValue::from_str(&format!("SHA-256={}", hash)) {
+                res.headers_mut()
+                    .insert(header::HeaderName::from_static("digest"), val);
+            }
+            if let Ok(val) = header::HeaderValue::from_str(&etag) {
+                res.headers_mut().insert(header::ETAG, val);
             }
         }
+
+        res.extensions_mut().insert(LogAction::DownloadFile);
+        return res;
     }
 }
 
 const FAVICON_SVG: &[u8] = include_bytes!("../docs/favicon.svg");
 
 pub async fn favicon() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, "image/svg+xml")], FAVICON_SVG)
+    let mut res = ([(header::CONTENT_TYPE, "image/svg+xml")], FAVICON_SVG).into_response();
+    res.extensions_mut().insert(LogAction::Favicon);
+    res
 }
 
 async fn list_directory(

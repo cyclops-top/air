@@ -1,5 +1,27 @@
 use anyhow::{anyhow, Result};
 use std::path::{Path, PathBuf};
+use sha2::{Sha256, Digest};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use tokio::io::AsyncReadExt;
+
+/// Calculates the SHA-256 digest of a file at the given path.
+/// Returns a Base64-encoded string compatible with RFC 3230.
+pub async fn calculate_sha256(path: &Path) -> Result<String> {
+    let mut file = tokio::fs::File::open(path).await?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 8192];
+
+    loop {
+        let n = file.read(&mut buffer).await?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buffer[..n]);
+    }
+
+    let result = hasher.finalize();
+    Ok(STANDARD.encode(result))
+}
 
 /// Sanitizes the request path to ensure it is safely within the root directory.
 ///
@@ -122,5 +144,17 @@ mod tests {
         let result = sanitize_path(&root, "missing.txt");
         // Should be error (NotFound usually)
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_calculate_sha256() {
+        let temp = TempDir::new().unwrap();
+        let file_path = temp.path().join("hash_test.txt");
+        std::fs::write(&file_path, "hello world").unwrap();
+
+        let hash = calculate_sha256(&file_path).await.unwrap();
+        // python3 -c "import hashlib, base64; print(base64.b64encode(hashlib.sha256(b'hello world').digest()).decode())"
+        // uU0nuZNNPgilLlLX2n2r+sSE7+N6U4DukIj3rOLvzek=
+        assert_eq!(hash, "uU0nuZNNPgilLlLX2n2r+sSE7+N6U4DukIj3rOLvzek=");
     }
 }
