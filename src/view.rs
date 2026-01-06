@@ -7,7 +7,7 @@ pub struct FileEntry {
     pub is_dir: bool,
     pub size: u64,
     #[serde(rename = "modTime")]
-    pub mod_time: String, 
+    pub mod_time: String,
 }
 
 #[derive(Serialize)]
@@ -25,7 +25,9 @@ pub fn render_html(listing: &DirectoryListing) -> String {
     html.push_str(&listing.current_path);
     html.push_str("</title>");
     html.push_str("<style>");
-    html.push_str("body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }");
+    html.push_str(
+        "body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }",
+    );
     html.push_str("ul { list-style: none; padding: 0; }");
     html.push_str("li { padding: 8px 12px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }");
     html.push_str("li:hover { background-color: #f5f5f5; }");
@@ -45,7 +47,7 @@ pub fn render_html(listing: &DirectoryListing) -> String {
     html.push_str("<ul>");
 
     if listing.current_path != "/" && !listing.current_path.is_empty() {
-         html.push_str("<li><span class='icon'>📁</span><a href='../'>..</a></li>");
+        html.push_str("<li><span class='icon'>📁</span><a href='../'>..</a></li>");
     }
 
     for item in &listing.items {
@@ -55,8 +57,12 @@ pub fn render_html(listing: &DirectoryListing) -> String {
         } else {
             item.name.clone()
         };
-        
-        let size_str = if item.is_dir { "-".to_string() } else { format_size(item.size) };
+
+        let size_str = if item.is_dir {
+            "-".to_string()
+        } else {
+            format_size(item.size)
+        };
 
         html.push_str("<li><span class='icon'>");
         html.push_str(icon);
@@ -84,45 +90,44 @@ pub fn format_size(bytes: u64) -> String {
         format!("{:.2} MB", bytes as f64 / MB as f64)
     } else if bytes >= KB {
         format!("{:.2} KB", bytes as f64 / KB as f64)
-        } else {
-            format!("{} B", bytes)
-        }
+    } else {
+        format!("{} B", bytes)
     }
-    
-    fn render_breadcrumbs(path: &str) -> String {
-        let mut html = String::new();
-        let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-        
-        // Always start with Home
-        html.push_str("<a href='/'>Home</a>");
-    
-        let mut accumulator = String::from("");
-        
-        for part in parts {
-            accumulator.push('/');
-            accumulator.push_str(part);
-            
-            html.push_str("<span class='separator'>/</span>");
-            html.push_str(&format!("<a href='{}'>{}</a>", accumulator, part));
-        }
-        
-        html
+}
+
+fn render_breadcrumbs(path: &str) -> String {
+    let mut html = String::new();
+    let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+
+    // Always start with Home
+    html.push_str("<a href='/'>Home</a>");
+
+    let mut accumulator = String::from("");
+
+    for part in parts {
+        accumulator.push('/');
+        accumulator.push_str(part);
+
+        html.push_str("<span class='separator'>/</span>");
+        html.push_str(&format!("<a href='{}'>{}</a>", accumulator, part));
     }
-    
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-    
-        #[test]
-        fn test_breadcrumbs_root() {
-            let html = render_breadcrumbs("/");
-            assert_eq!(html, "<a href='/'>Home</a>");
-        }
-    
-        #[test]
-        fn test_breadcrumbs_deep() {
-            let html = render_breadcrumbs("/Movies/Action");
-            assert_eq!(html, "<a href='/'>Home</a><span class='separator'>/</span><a href='/Movies'>Movies</a><span class='separator'>/</span><a href='/Movies/Action'>Action</a>");
-        }
+
+    html
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_breadcrumbs_root() {
+        let html = render_breadcrumbs("/");
+        assert_eq!(html, "<a href='/'>Home</a>");
     }
-    
+
+    #[test]
+    fn test_breadcrumbs_deep() {
+        let html = render_breadcrumbs("/Movies/Action");
+        assert_eq!(html, "<a href='/'>Home</a><span class='separator'>/</span><a href='/Movies'>Movies</a><span class='separator'>/</span><a href='/Movies/Action'>Action</a>");
+    }
+}
