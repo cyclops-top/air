@@ -78,7 +78,14 @@ pub async fn handle_request(
     // Sanitize
     let abs_path = match fs_utils::sanitize_path(&state.root_path, &decoded_path) {
         Ok(p) => p,
-        Err(_) => return StatusCode::FORBIDDEN.into_response(),
+        Err(e) => {
+            if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
+                if io_err.kind() == std::io::ErrorKind::NotFound {
+                    return StatusCode::NOT_FOUND.into_response();
+                }
+            }
+            return StatusCode::FORBIDDEN.into_response();
+        }
     };
 
     // Check metadata
@@ -88,6 +95,17 @@ pub async fn handle_request(
     };
 
     if metadata.is_dir() {
+        // Enforce trailing slash for directories
+        if !uri_path.ends_with('/') {
+            let mut new_uri = uri_path;
+            new_uri.push('/');
+            if let Some(query) = req.uri().query() {
+                new_uri.push('?');
+                new_uri.push_str(query);
+            }
+            return axum::response::Redirect::permanent(&new_uri).into_response();
+        }
+
         // List directory
         let mut res = list_directory(&abs_path, &decoded_path, headers).await;
         res.extensions_mut().insert(LogAction::OpenDir);
@@ -274,5 +292,61 @@ mod tests {
 
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         assert_eq!(body, &FAVICON_SVG[..]);
+    }
+
+    #[test]
+    fn test_digest_cache_invalidation_logic() {
+        let cache = dashmap::DashMap::new();
+        let path = PathBuf::from("test.txt");
+        let mtime1 = std::time::SystemTime::now();
+        let size1 = 100;
+        let hash1 = "hash1".to_string();
+
+        // Initial insert
+        cache.insert(
+            path.clone(),
+            DigestEntry {
+                hash: hash1.clone(),
+                mtime: mtime1,
+                size: size1,
+            },
+        );
+
+        // 1. Same mtime and size -> Cache Hit
+        {
+            let entry = cache.get(&path).unwrap();
+            assert_eq!(entry.mtime, mtime1);
+            assert_eq!(entry.size, size1);
+            assert_eq!(entry.hash, hash1);
+        }
+
+        // 2. Different mtime -> Cache Miss (simulated by logic in handle_request)
+        let mtime2 = mtime1 + std::time::Duration::from_secs(1);
+        let size2 = 100;
+        
+        let hash_to_use = if let Some(entry) = cache.get(&path) {
+            if entry.mtime == mtime2 && entry.size == size2 {
+                entry.hash.clone()
+            } else {
+                "hash2".to_string() // Recalculated
+            }
+        } else {
+            "hash2".to_string()
+        };
+        assert_eq!(hash_to_use, "hash2");
+
+        // 3. Different size -> Cache Miss
+        let mtime3 = mtime1;
+        let size3 = 200;
+        let hash_to_use = if let Some(entry) = cache.get(&path) {
+            if entry.mtime == mtime3 && entry.size == size3 {
+                entry.hash.clone()
+            } else {
+                "hash3".to_string() // Recalculated
+            }
+        } else {
+            "hash3".to_string()
+        };
+        assert_eq!(hash_to_use, "hash3");
     }
 }

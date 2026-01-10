@@ -33,7 +33,8 @@ pub fn render_html(listing: &DirectoryListing) -> String {
     html.push_str("li:hover { background-color: #f5f5f5; }");
     html.push_str("a { text-decoration: none; color: #333; flex-grow: 1; }");
     html.push_str(".icon { margin-right: 10px; }");
-    html.push_str(".size { color: #888; font-size: 0.9em; }");
+    html.push_str(".time { color: #888; font-size: 0.9em; margin-right: 20px; white-space: nowrap; }");
+    html.push_str(".size { color: #888; font-size: 0.9em; width: 80px; text-align: right; }");
     html.push_str(".header { font-size: 1.2em; margin-bottom: 20px; color: #555; }");
     html.push_str(".header a { color: #007bff; text-decoration: none; }");
     html.push_str(".header a:hover { text-decoration: underline; }");
@@ -64,13 +65,22 @@ pub fn render_html(listing: &DirectoryListing) -> String {
             format_size(item.size)
         };
 
+        // Format RFC 3339 to a simpler YYYY-MM-DD HH:MM:SS
+        let display_time = if item.mod_time.len() >= 19 {
+            item.mod_time[..19].replace('T', " ")
+        } else {
+            item.mod_time.clone()
+        };
+
         html.push_str("<li><span class='icon'>");
         html.push_str(icon);
         html.push_str("</span><a href='");
         html.push_str(&href);
         html.push_str("'>");
         html.push_str(&item.name);
-        html.push_str("</a><span class='size'>");
+        html.push_str("</a><span class='time'>");
+        html.push_str(&display_time);
+        html.push_str("</span><span class='size'>");
         html.push_str(&size_str);
         html.push_str("</span></li>");
     }
@@ -154,7 +164,7 @@ fn render_breadcrumbs(path: &str) -> String {
         accumulator.push_str(part);
 
         html.push_str("<span class='separator'>/</span>");
-        html.push_str(&format!("<a href='{}'>{}</a>", accumulator, part));
+        html.push_str(&format!("<a href='{}/'>{}</a>", accumulator, part));
     }
 
     html
@@ -173,7 +183,7 @@ mod tests {
     #[test]
     fn test_breadcrumbs_deep() {
         let html = render_breadcrumbs("/Movies/Action");
-        assert_eq!(html, "<a href='/'>Home</a><span class='separator'>/</span><a href='/Movies'>Movies</a><span class='separator'>/</span><a href='/Movies/Action'>Action</a>");
+        assert_eq!(html, "<a href='/'>Home</a><span class='separator'>/</span><a href='/Movies/'>Movies</a><span class='separator'>/</span><a href='/Movies/Action/'>Action</a>");
     }
 
     #[test]
