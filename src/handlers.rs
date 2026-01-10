@@ -1,14 +1,16 @@
 use crate::{fs_utils, view};
 use axum::{
+    body::Body,
     extract::{Request, State},
     http::{header, HeaderMap, StatusCode},
     response::{Html, IntoResponse, Json, Response},
 };
+use bytes::Bytes;
+use memmap2::Mmap;
 use percent_encoding::percent_decode_str;
-use std::path::PathBuf;
-use std::sync::Arc;
-use tower::ServiceExt;
-use tower_http::services::ServeFile;
+use std::ops::Range;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Weak};
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
@@ -54,11 +56,72 @@ pub struct DigestEntry {
     pub size: u64,
 }
 
+pub struct MappedFile {
+    pub mmap: Mmap,
+    pub path: PathBuf,
+    cache: Arc<MmapCache>,
+}
+
+impl Drop for MappedFile {
+    fn drop(&mut self) {
+        self.cache.remove(&self.path);
+    }
+}
+
+pub struct MmapCache {
+    mappings: dashmap::DashMap<PathBuf, Weak<MappedFile>>,
+}
+
+impl MmapCache {
+    pub fn new() -> Self {
+        Self {
+            mappings: dashmap::DashMap::new(),
+        }
+    }
+
+    pub fn get_or_create(self: &Arc<Self>, path: &Path) -> std::io::Result<Arc<MappedFile>> {
+        if let Some(weak) = self.mappings.get(path) {
+            if let Some(arc) = weak.upgrade() {
+                return Ok(arc);
+            }
+        }
+
+        // Create new mapping
+        let file = std::fs::File::open(path)?;
+        let mmap = unsafe { Mmap::map(&file)? };
+
+        let mapped_file = Arc::new(MappedFile {
+            mmap,
+            path: path.to_path_buf(),
+            cache: self.clone(),
+        });
+
+        self.mappings
+            .insert(path.to_path_buf(), Arc::downgrade(&mapped_file));
+        Ok(mapped_file)
+    }
+
+    fn remove(&self, path: &Path) {
+        // We only remove if the Weak reference is dead or points to something else
+        // (though with PathBuf as key, it should be unique).
+        // To be safe, we check if it can still be upgraded.
+        if let Some(weak) = self.mappings.get(path) {
+            if weak.upgrade().is_none() {
+                drop(weak);
+                self.mappings.remove(path);
+            }
+        }
+    }
+}
+
 pub struct AppState {
     pub root_path: PathBuf,
     pub stats: Arc<Stats>,
     pub enable_https: bool,
     pub digest_cache: dashmap::DashMap<PathBuf, DigestEntry>,
+    pub mmap_cache: Arc<MmapCache>,
+    pub lan_ip: String,
+    pub port: u16,
 }
 
 pub async fn handle_request(
@@ -107,7 +170,7 @@ pub async fn handle_request(
         }
 
         // List directory
-        let mut res = list_directory(&abs_path, &decoded_path, headers).await;
+        let mut res = list_directory(state.clone(), &abs_path, &decoded_path, headers).await;
         res.extensions_mut().insert(LogAction::OpenDir);
         return res;
     } else {
@@ -164,16 +227,57 @@ pub async fn handle_request(
             .total_bytes
             .fetch_add(metadata.len(), std::sync::atomic::Ordering::Relaxed);
 
-        // Serve file
-        // ServeFile handles Range requests automatically.
-        let mut res = match ServeFile::new(abs_path).oneshot(req).await {
-            Ok(res) => res.into_response(),
-            Err(err) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to serve file: {}", err),
-            )
-                .into_response(),
+        // Serve file using mmap
+        let mapped = match state.mmap_cache.get_or_create(&abs_path) {
+            Ok(m) => m,
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to map file: {}", e),
+                )
+                    .into_response()
+            }
         };
+
+        let file_size = mapped.mmap.len();
+        let mime = mime_guess::from_path(&abs_path).first_or_octet_stream();
+
+        let mut res = if let Some(range_header) = headers.get(header::RANGE).and_then(|v| v.to_str().ok()) {
+            if let Some(range) = parse_range(range_header, file_size) {
+                let bytes = Bytes::copy_from_slice(&mapped.mmap[range.clone()]);
+                // We use copy_from_slice here because Bytes from Mmap slice is tricky without unsafe
+                // or specific crates. To truly be zero-copy and shared, we'd want to wrap Arc<MappedFile>
+                // in something that implements Buf or Stream.
+                // For now, let's use a simpler approach that still uses the shared mmap.
+                
+                let mut response = (StatusCode::PARTIAL_CONTENT, Body::from(bytes)).into_response();
+                response.headers_mut().insert(
+                    header::CONTENT_RANGE,
+                    header::HeaderValue::from_str(&format!(
+                        "bytes {}-{}/{}",
+                        range.start,
+                        range.end - 1,
+                        file_size
+                    ))
+                    .unwrap(),
+                );
+                response
+            } else {
+                StatusCode::RANGE_NOT_SATISFIABLE.into_response()
+            }
+        } else {
+            let bytes = Bytes::copy_from_slice(&mapped.mmap[..]);
+            (StatusCode::OK, Body::from(bytes)).into_response()
+        };
+
+        res.headers_mut().insert(
+            header::CONTENT_TYPE,
+            header::HeaderValue::from_str(mime.as_ref()).unwrap(),
+        );
+        res.headers_mut().insert(
+            header::ACCEPT_RANGES,
+            header::HeaderValue::from_static("bytes"),
+        );
 
         // 3. Inject Digest and ETag Headers
         if !hash.is_empty() {
@@ -199,7 +303,49 @@ pub async fn favicon() -> impl IntoResponse {
     res
 }
 
+fn parse_range(range_header: &str, file_size: usize) -> Option<Range<usize>> {
+    if !range_header.starts_with("bytes=") {
+        return None;
+    }
+
+    let range_str = &range_header[6..];
+    let parts: Vec<&str> = range_str.split('-').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+
+    let start = parts[0].parse::<usize>().ok();
+    let end = parts[1].parse::<usize>().ok();
+
+    match (start, end) {
+        (Some(s), Some(e)) => {
+            if s <= e && e < file_size {
+                Some(s..e + 1)
+            } else {
+                None
+            }
+        }
+        (Some(s), None) => {
+            if s < file_size {
+                Some(s..file_size)
+            } else {
+                None
+            }
+        }
+        (None, Some(e)) => {
+            if e > 0 {
+                let s = file_size.saturating_sub(e);
+                Some(s..file_size)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 async fn list_directory(
+    state: Arc<AppState>,
     abs_path: &std::path::Path,
     request_path: &str,
     headers: HeaderMap,
@@ -260,6 +406,8 @@ async fn list_directory(
     let listing = view::DirectoryListing {
         current_path: request_path.to_string(),
         items,
+        lan_ip: state.lan_ip.clone(),
+        port: state.port,
     };
 
     // Check Accept header
@@ -348,5 +496,33 @@ mod tests {
             "hash3".to_string()
         };
         assert_eq!(hash_to_use, "hash3");
+    }
+
+    #[tokio::test]
+    async fn test_mmap_cache_sharing() {
+        let cache = Arc::new(MmapCache::new());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("test_mmap.txt");
+        std::fs::write(&file_path, "mmap test content").unwrap();
+
+        // 1. Create first mapping
+        let mmap1 = cache.get_or_create(&file_path).unwrap();
+        assert_eq!(&mmap1.mmap[..], b"mmap test content");
+
+        // 2. Get second mapping (should be shared)
+        let mmap2 = cache.get_or_create(&file_path).unwrap();
+        assert!(Arc::ptr_eq(&mmap1, &mmap2));
+
+        // 3. Drop all mappings
+        let weak = Arc::downgrade(&mmap1);
+        drop(mmap1);
+        drop(mmap2);
+
+        // 4. Verify cache eventually clears (when last reference dropped)
+        assert!(weak.upgrade().is_none());
+        
+        // Cache entry should be removable/removed on next access or via explicit cleanup
+        // Our 'remove' logic is triggered on Drop of MappedFile.
+        assert_eq!(cache.mappings.len(), 0);
     }
 }

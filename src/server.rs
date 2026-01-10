@@ -44,6 +44,9 @@ pub async fn start(
         stats: stats.clone(),
         enable_https,
         digest_cache: dashmap::DashMap::new(),
+        mmap_cache: Arc::new(handlers::MmapCache::new()),
+        lan_ip: lan_ip.to_string(),
+        port: used_port,
     });
 
     let app = Router::new()
