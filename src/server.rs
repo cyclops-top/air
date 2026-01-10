@@ -21,12 +21,20 @@ pub async fn start(
         let addr = SocketAddr::from(([0, 0, 0, 0], p));
         (TcpListener::bind(addr).await?, p)
     } else {
-        let mut rng = rand::rng();
-        loop {
-            let p = rng.random_range(10000..=65535);
-            let addr = SocketAddr::from(([0, 0, 0, 0], p));
-            if let Ok(l) = TcpListener::bind(addr).await {
-                break (l, p);
+        // Step 1: Try default non-common port 9568
+        let default_port = 9568;
+        let default_addr = SocketAddr::from(([0, 0, 0, 0], default_port));
+        if let Ok(l) = TcpListener::bind(default_addr).await {
+            (l, default_port)
+        } else {
+            // Step 2: Default taken, fallback to random logic
+            let mut rng = rand::rng();
+            loop {
+                let p = rng.random_range(10000..=65535);
+                let addr = SocketAddr::from(([0, 0, 0, 0], p));
+                if let Ok(l) = TcpListener::bind(addr).await {
+                    break (l, p);
+                }
             }
         }
     };
