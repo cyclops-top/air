@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html class="dark" lang="en"><head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>AIR - macOS Glassmorphism Browser</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#3b82f6",
+                        "accent-cyan": "#22d3ee",
+                        "accent-green": "#4ade80",
+                        "mac-bg-start": "#0f172a",
+                        "mac-bg-end": "#1e1b4b",
+                    },
+                    fontFamily: {
+                        "display": ["Space Grotesk", "sans-serif"],
+                        "mono": ["Space Mono", "monospace"]
+                    },
+                    borderRadius: {
+                        'macos': '16px',
+                    }
+                },
+            },
+        }
+    </script>
+    <style type="text/tailwindcss">
+        body {
+            @apply transition-colors duration-500 bg-slate-50 dark:bg-[#0f172a];
+            background-image: radial-gradient(circle at top left, #f1f5f9, #e2e8f0);
+            height: 100vh;
+            overflow: hidden;
+        }
+        .dark body {
+            background-image: radial-gradient(circle at top left, #1e293b, #0f172a);
+        }
+        .bokeh {
+            position: fixed;
+            width: 500px;
+            height: 500px;
+            border-radius: 50%;
+            filter: blur(120px);
+            opacity: 0.15;
+            z-index: -1;
+            pointer-events: none;
+        }
+        .glass-container {
+            backdrop-filter: blur(40px);
+            -webkit-backdrop-filter: blur(40px);
+            background: rgba(255, 255, 255, 0.4);
+            border: 1px solid rgba(0, 0, 0, 0.05);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.1), inset 0 1px 1px rgba(255, 255, 255, 0.5);
+        }
+        .dark .glass-container {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.1);
+        }
+        .glass-header {
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            background: rgba(255, 255, 255, 0.8);
+            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+        }
+        .dark .glass-header {
+            background: rgba(15, 23, 42, 0.6);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .glass-button {
+            background: rgba(0, 0, 0, 0.05);
+            border: 1px solid rgba(0, 0, 0, 0.05);
+            backdrop-filter: blur(10px);
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .dark .glass-button {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .glass-button:hover {
+            background: rgba(0, 0, 0, 0.1);
+            transform: translateY(-1px);
+        }
+        .dark .glass-button:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.3);
+        }
+        .cyber-text {
+            letter-spacing: 0.1em;
+            font-variant-numeric: tabular-nums;
+        }
+        .status-dot {
+            box-shadow: 0 0 10px rgba(74, 222, 128, 0.4);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.02);
+            border-radius: 10px;
+        }
+        .dark .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.02);
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(59, 130, 246, 0.2);
+            border-radius: 10px;
+            border: 1px solid rgba(0, 0, 0, 0.05);
+        }
+        .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: rgba(59, 130, 246, 0.4);
+        }
+        .theme-toggle-glow {
+            box-shadow: 0 0 12px rgba(34, 211, 238, 0.3);
+        }
+    </style>
+</head>
+<body class="font-display text-slate-900 dark:text-slate-200 selection:bg-primary/40 overflow-hidden">
+<div class="bokeh top-[-100px] left-[-100px] bg-blue-500/20 dark:bg-blue-500"></div>
+<div class="bokeh bottom-[-100px] right-[-100px] bg-purple-600/20 dark:bg-purple-600"></div>
+<div class="bokeh top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-cyan-500 opacity-[0.05]"></div>
+<div class="flex flex-col h-screen w-full relative">
+    <header class="glass-header flex-shrink-0 z-50 w-full px-8 py-4 lg:px-12 flex items-center justify-between">
+        <div class="flex items-center gap-10">
+            <div class="flex items-center gap-3">
+                <div class="size-9 bg-primary flex items-center justify-center rounded-macos shadow-lg shadow-primary/20">
+                    <span class="material-symbols-outlined text-white text-xl">air</span>
+                </div>
+                <h1 class="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">AIR</h1>
+            </div>
+            <div class="hidden md:flex items-center gap-6">
+                <div class="flex items-center gap-2.5 px-3 py-1.5 bg-slate-900/5 dark:bg-white/5 rounded-full border border-slate-900/10 dark:border-white/10">
+                    <div class="size-2 rounded-full bg-accent-green status-dot animate-pulse"></div>
+                    <span class="text-[10px] font-bold uppercase tracking-widest text-accent-green">System Online</span>
+                </div>
+                <div class="flex items-center gap-2 text-xs font-medium text-slate-500 dark:text-slate-400 font-mono">
+                    <span class="material-symbols-outlined text-base text-accent-cyan">sensors</span>
+                    <span>192.168.1.104</span>
+                </div>
+            </div>
+        </div>
+        <div class="flex items-center gap-4">
+            <div class="hidden lg:flex flex-col items-end mr-2">
+                <span class="text-[9px] uppercase tracking-widest text-slate-400 dark:text-slate-500 font-bold">Node Identity</span>
+                <span class="text-xs font-mono text-slate-600 dark:text-slate-300">ALPHA_V3_GRID</span>
+            </div>
+            <button class="glass-button theme-toggle-glow size-10 rounded-macos flex items-center justify-center text-slate-700 dark:text-accent-cyan transition-colors" onclick="document.documentElement.classList.toggle('dark')">
+                <span class="material-symbols-outlined text-xl block dark:hidden">light_mode</span>
+                <span class="material-symbols-outlined text-xl hidden dark:block">dark_mode</span>
+            </button>
+            <button class="glass-button size-10 rounded-macos flex items-center justify-center">
+                <span class="material-symbols-outlined text-xl text-slate-700 dark:text-slate-200">terminal</span>
+            </button>
+            <button class="glass-button size-10 rounded-macos flex items-center justify-center">
+                <span class="material-symbols-outlined text-xl text-slate-700 dark:text-slate-200">settings</span>
+            </button>
+        </div>
+    </header>
+    <main class="flex-1 flex flex-col items-center px-8 lg:px-12 min-h-0">
+        <div class="w-full max-w-6xl flex flex-col h-full">
+            <nav class="flex items-center gap-2 px-1 py-8 flex-shrink-0">
+                <div class="flex items-center gap-2 font-medium text-sm text-slate-500 dark:text-slate-400">
+                    <button class="hover:text-slate-900 dark:hover:text-white transition-colors">AIR</button>
+                    <span class="material-symbols-outlined text-base opacity-40">chevron_right</span>
+                    <button class="hover:text-slate-900 dark:hover:text-white transition-colors">Root</button>
+                    <span class="material-symbols-outlined text-base opacity-40">chevron_right</span>
+                    <button class="hover:text-slate-900 dark:hover:text-white transition-colors">Documents</button>
+                    <span class="material-symbols-outlined text-base opacity-40">chevron_right</span>
+                    <span class="text-slate-900 dark:text-white font-semibold px-2 py-0.5 bg-slate-900/10 dark:bg-white/10 rounded-md">Project_X</span>
+                </div>
+            </nav>
+            <div class="flex-1 min-h-0 mb-4">
+                <section class="glass-container rounded-macos h-full flex flex-col overflow-hidden">
+                    <div class="flex-shrink-0 bg-slate-900/[0.02] dark:bg-white/[0.04] border-b border-slate-900/5 dark:border-white/5">
+                        <table class="w-full border-collapse table-fixed">
+                            <thead>
+                            <tr class="text-left">
+                                <th class="px-8 py-4 text-[11px] uppercase tracking-widest text-slate-500 dark:text-slate-400 font-bold w-1/2">Filename</th>
+                                <th class="px-8 py-4 text-[11px] uppercase tracking-widest text-slate-500 dark:text-slate-400 font-bold w-[15%]">Size</th>
+                                <th class="px-8 py-4 text-[11px] uppercase tracking-widest text-slate-500 dark:text-slate-400 font-bold w-[20%]">Last Sync</th>
+                                <th class="px-8 py-4 text-[11px] uppercase tracking-widest text-slate-500 dark:text-slate-400 font-bold text-right w-[15%]">Action</th>
+                            </tr>
+                            </thead>
+                        </table>
+                    </div>
+                    <div class="flex-1 overflow-y-auto custom-scrollbar">
+                        <table class="w-full border-collapse table-fixed">
+                            <tbody class="divide-y divide-slate-900/[0.04] dark:divide-white/[0.04]">
+                            <tr class="group hover:bg-slate-900/[0.02] dark:hover:bg-white/[0.03] transition-colors duration-200">
+                                <td class="px-8 py-6 w-1/2">
+                                    <div class="flex items-center gap-4">
+                                        <div class="size-10 flex items-center justify-center rounded-macos bg-blue-500/10 text-primary">
+                                            <span class="material-symbols-outlined text-2xl">description</span>
+                                        </div>
+                                        <span class="text-[17px] text-slate-900 dark:text-white font-medium truncate">orbital_schematics_rev4.arc</span>
+                                    </div>
+                                </td>
+                                <td class="px-8 py-6 w-[15%]">
+                                    <span class="text-[15px] text-slate-600 dark:text-slate-300 font-mono">1.24 GB</span>
+                                </td>
+                                <td class="px-8 py-6 w-[20%]">
+                                    <span class="text-sm text-slate-500 dark:text-slate-400 font-mono">2024.10.24 <span class="text-slate-300 dark:text-slate-600 px-1">/</span> 14:02</span>
+                                </td>
+                                <td class="px-8 py-6 text-right w-[15%]">
+                                    <button class="glass-button size-10 rounded-macos inline-flex items-center justify-center text-primary">
+                                        <span class="material-symbols-outlined text-xl">download</span>
+                                    </button>
+                                </td>
+                            </tr>
+                            <tr class="group hover:bg-slate-900/[0.02] dark:hover:bg-white/[0.03] transition-colors duration-200">
+                                <td class="px-8 py-6 w-1/2">
+                                    <div class="flex items-center gap-4">
+                                        <div class="size-10 flex items-center justify-center rounded-macos bg-emerald-500/10 text-accent-green">
+                                            <span class="material-symbols-outlined text-2xl">analytics</span>
+                                        </div>
+                                        <span class="text-[17px] text-slate-900 dark:text-white font-medium truncate">cryo_logs_v2_core.log</span>
+                                    </div>
+                                </td>
+                                <td class="px-8 py-6 w-[15%]">
+                                    <span class="text-[15px] text-slate-600 dark:text-slate-300 font-mono">412 KB</span>
+                                </td>
+                                <td class="px-8 py-6 w-[20%]">
+                                    <span class="text-sm text-slate-500 dark:text-slate-400 font-mono">2024.10.24 <span class="text-slate-300 dark:text-slate-600 px-1">/</span> 13:55</span>
+                                </td>
+                                <td class="px-8 py-6 text-right w-[15%]">
+                                    <button class="glass-button size-10 rounded-macos inline-flex items-center justify-center text-primary">
+                                        <span class="material-symbols-outlined text-xl">download</span>
+                                    </button>
+                                </td>
+                            </tr>
+                            <tr class="group hover:bg-slate-900/[0.02] dark:hover:bg-white/[0.03] transition-colors duration-200">
+                                <td class="px-8 py-6 w-1/2">
+                                    <div class="flex items-center gap-4">
+                                        <div class="size-10 flex items-center justify-center rounded-macos bg-cyan-500/10 text-accent-cyan">
+                                            <span class="material-symbols-outlined text-2xl">database</span>
+                                        </div>
+                                        <span class="text-[17px] text-slate-900 dark:text-white font-medium truncate">engine_thrust_vectors.csv</span>
+                                    </div>
+                                </td>
+                                <td class="px-8 py-6 w-[15%]">
+                                    <span class="text-[15px] text-slate-600 dark:text-slate-300 font-mono">892 MB</span>
+                                </td>
+                                <td class="px-8 py-6 w-[20%]">
+                                    <span class="text-sm text-slate-500 dark:text-slate-400 font-mono">2024.10.24 <span class="text-slate-300 dark:text-slate-600 px-1">/</span> 12:30</span>
+                                </td>
+                                <td class="px-8 py-6 text-right w-[15%]">
+                                    <button class="glass-button size-10 rounded-macos inline-flex items-center justify-center text-primary">
+                                        <span class="material-symbols-outlined text-xl">download</span>
+                                    </button>
+                                </td>
+                            </tr>
+                            <tr class="group hover:bg-slate-900/[0.02] dark:hover:bg-white/[0.03] transition-colors duration-200">
+                                <td class="px-8 py-6 w-1/2">
+                                    <div class="flex items-center gap-4">
+                                        <div class="size-10 flex items-center justify-center rounded-macos bg-indigo-500/10 text-indigo-400">
+                                            <span class="material-symbols-outlined text-2xl">map</span>
+                                        </div>
+                                        <span class="text-[17px] text-slate-900 dark:text-white font-medium truncate">sector_7_star_map.svg</span>
+                                    </div>
+                                </td>
+                                <td class="px-8 py-6 w-[15%]">
+                                    <span class="text-[15px] text-slate-600 dark:text-slate-300 font-mono">15.6 MB</span>
+                                </td>
+                                <td class="px-8 py-6 w-[20%]">
+                                    <span class="text-sm text-slate-500 dark:text-slate-400 font-mono">2024.10.24 <span class="text-slate-300 dark:text-slate-600 px-1">/</span> 11:15</span>
+                                </td>
+                                <td class="px-8 py-6 text-right w-[15%]">
+                                    <button class="glass-button size-10 rounded-macos inline-flex items-center justify-center text-primary">
+                                        <span class="material-symbols-outlined text-xl">download</span>
+                                    </button>
+                                </td>
+                            </tr>
+                            <tr class="group hover:bg-slate-900/[0.02] dark:hover:bg-white/[0.03] transition-colors duration-200">
+                                <td class="px-8 py-6 w-1/2">
+                                    <div class="flex items-center gap-4">
+                                        <div class="size-10 flex items-center justify-center rounded-macos bg-rose-500/10 text-rose-400">
+                                            <span class="material-symbols-outlined text-2xl">verified_user</span>
+                                        </div>
+                                        <span class="text-[17px] text-slate-900 dark:text-white font-medium truncate">access_protocols_delta.key</span>
+                                    </div>
+                                </td>
+                                <td class="px-8 py-6 w-[15%]">
+                                    <span class="text-[15px] text-slate-600 dark:text-slate-300 font-mono">4 KB</span>
+                                </td>
+                                <td class="px-8 py-6 w-[20%]">
+                                    <span class="text-sm text-slate-500 dark:text-slate-400 font-mono">2024.10.24 <span class="text-slate-300 dark:text-slate-600 px-1">/</span> 10:45</span>
+                                </td>
+                                <td class="px-8 py-6 text-right w-[15%]">
+                                    <button class="glass-button size-10 rounded-macos inline-flex items-center justify-center text-primary">
+                                        <span class="material-symbols-outlined text-xl">download</span>
+                                    </button>
+                                </td>
+                            </tr>
+                            <tr class="group hover:bg-slate-900/[0.02] dark:hover:bg-white/[0.03] transition-colors duration-200">
+                                <td class="px-8 py-6 w-1/2">
+                                    <div class="flex items-center gap-4">
+                                        <div class="size-10 flex items-center justify-center rounded-macos bg-orange-500/10 text-orange-400">
+                                            <span class="material-symbols-outlined text-2xl">video_library</span>
+                                        </div>
+                                        <span class="text-[17px] text-slate-900 dark:text-white font-medium truncate">hull_stress_test_recording.mp4</span>
+                                    </div>
+                                </td>
+                                <td class="px-8 py-6 w-[15%]">
+                                    <span class="text-[15px] text-slate-600 dark:text-slate-300 font-mono">2.8 GB</span>
+                                </td>
+                                <td class="px-8 py-6 w-[20%]">
+                                    <span class="text-sm text-slate-500 dark:text-slate-400 font-mono">2024.10.24 <span class="text-slate-300 dark:text-slate-600 px-1">/</span> 09:20</span>
+                                </td>
+                                <td class="px-8 py-6 text-right w-[15%]">
+                                    <button class="glass-button size-10 rounded-macos inline-flex items-center justify-center text-primary">
+                                        <span class="material-symbols-outlined text-xl">download</span>
+                                    </button>
+                                </td>
+                            </tr>
+                            <tr class="group hover:bg-slate-900/[0.02] dark:hover:bg-white/[0.03] transition-colors duration-200">
+                                <td class="px-8 py-6 w-1/2">
+                                    <div class="flex items-center gap-4">
+                                        <div class="size-10 flex items-center justify-center rounded-macos bg-slate-500/10 text-slate-400">
+                                            <span class="material-symbols-outlined text-2xl">folder</span>
+                                        </div>
+                                        <span class="text-[17px] text-slate-900 dark:text-white font-medium truncate">backup_archives</span>
+                                    </div>
+                                </td>
+                                <td class="px-8 py-6 w-[15%]">
+                                    <span class="text-[15px] text-slate-600 dark:text-slate-300 font-mono">--</span>
+                                </td>
+                                <td class="px-8 py-6 w-[20%]">
+                                    <span class="text-sm text-slate-500 dark:text-slate-400 font-mono">2024.10.23 <span class="text-slate-300 dark:text-slate-600 px-1">/</span> 18:40</span>
+                                </td>
+                                <td class="px-8 py-6 text-right w-[15%]">
+                                    <button class="glass-button size-10 rounded-macos inline-flex items-center justify-center text-primary">
+                                        <span class="material-symbols-outlined text-xl">open_in_new</span>
+                                    </button>
+                                </td>
+                            </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+            <footer class="flex-shrink-0 flex justify-between items-center py-6 px-2 text-slate-400 dark:text-slate-500 bg-transparent">
+                <div class="flex items-center gap-4 text-[10px] cyber-text font-bold uppercase tracking-widest">
+                    <span>Active Node: 0x8F2</span>
+                    <span class="opacity-30">|</span>
+                    <span>Secure Protocol v4.1</span>
+                </div>
+                <div class="text-[10px] cyber-text font-bold uppercase tracking-widest opacity-60">
+                    AIR Browser Engine © 2024
+                </div>
+            </footer>
+        </div>
+    </main>
+</div>
+
+</body></html>

@@ -18,6 +18,11 @@ TBD - created by archiving change implement-core-rust. Update Purpose after arch
 - 文件列表，区分文件夹和文件图标。
 - 文件大小展示。
 
+#### Scenario: 强制尾随斜杠
+当请求路径指向一个目录但末尾没有 `/` 时（如 `/photos`）：
+- 服务器 MUST 返回 `301 Moved Permanently` 重定向到带斜杠的路径（如 `/photos/`）。
+- 如果原请求包含查询参数，重定向 MUST 保留这些参数。
+
 ### Requirement: 文件下载服务
 当请求路径指向一个文件时，服务器 MUST 提供文件内容。
 
@@ -34,7 +39,11 @@ Body 仅包含前 1024 字节。
 
 #### Scenario: 文件未找到
 用户请求不存在的路径。
-服务器返回 404 Not Found。
+服务器 MUST 返回 `404 Not Found`。
+
+#### Scenario: 路径越界保护
+当请求路径尝试通过 `..` 等手段访问根目录以外的文件时：
+- 服务器 MUST 返回 `403 Forbidden`。
 
 ### Requirement: Favicon 支持
 服务器 MUST 提供网站图标（Favicon）支持，以避免浏览器默认请求产生错误。
@@ -114,4 +123,22 @@ Web UI 的 HTML 页面 MUST 显式引用网站图标。
 在使用 `Range` 请求时：
 - 服务器 MUST 始终返回 `ETag` 头部。
 - 客户端可以使用该 ETag 确保多个分段属于同一个文件版本。
+
+### Requirement: 高效文件共享 (Memory Mapping)
+服务器 MUST 使用内存映射 (`mmap`) 技术来提升高并发下的文件读取性能。
+
+#### Scenario: 共享内存映射
+当多个客户端并发请求同一个大文件时：
+- 服务器 MUST 仅为该文件创建一个内存映射实例。
+- 所有请求 MUST 共享该映射中的数据，减少内存占用和系统调用。
+
+#### Scenario: 引用计数与自动释放
+- 服务器 MUST 跟踪每个内存映射的使用情况。
+- 当最后一个持有该映射的 HTTP 响应完成发送后，服务器 MUST 及时释放（关闭）该内存映射以回收系统资源。
+
+#### Scenario: 0 拷贝传输
+- 服务器 SHOULD 尽可能实现“零拷贝”传输，即直接将内存映射的页面交给网络协议栈，避免在应用层进行数据拷贝。
+
+#### Scenario: 并发创建保护
+- 当高并发请求一个尚未映射的文件时，服务器 MUST 确保只执行一次映射操作，避免竞态条件导致重复映射。
 
