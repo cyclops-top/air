@@ -31,7 +31,10 @@ jobs:
             asset_name: air-windows-amd64.exe
 
           # MacOS Intel
-          - os: macos-13
+          # 注意：macos-13 (Intel) 已被弃用。
+          # 我们现在使用 macos-latest (Apple Silicon) 来交叉编译 Intel 版本。
+          # Rust 可以在 ARM 机器上完美编译 x86_64 目标。
+          - os: macos-latest
             target: x86_64-apple-darwin
             artifact_name: air
             asset_name: air-darwin-amd64
