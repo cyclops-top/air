@@ -1,0 +1,92 @@
+name: Build and Release
+
+permissions:
+  contents: write
+
+on:
+  push:
+    tags:
+      - "v*" # 当推送类似 v0.1.0 的 tag 时触发
+  workflow_dispatch: # 允许手动触发
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: air
+            asset_name: air-linux-amd64
+
+          # Windows
+          # 注意：这里使用了 msvc 工具链，比 gnu 在 Windows 上更原生和稳定
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: air.exe
+            asset_name: air-windows-amd64.exe
+
+          # MacOS Intel
+          - os: macos-13
+            target: x86_64-apple-darwin
+            artifact_name: air
+            asset_name: air-darwin-amd64
+
+          # MacOS Apple Silicon (M1/M2/M3)
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: air
+            asset_name: air-darwin-arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Release
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare Asset
+        shell: bash
+        run: |
+          mkdir -p build
+          # 将编译出的文件重命名为你想要的格式
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} build/${{ matrix.asset_name }}
+
+      - name: Upload Artifact to Workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: build/${{ matrix.asset_name }}
+
+  create-release:
+    # 仅当推送 Tag 时才执行发布步骤
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

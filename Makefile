@@ -7,7 +7,7 @@ TARGET_MACOS_ARM = aarch64-apple-darwin
 TARGET_WIN_GNU = x86_64-pc-windows-gnu
 
 # Output directory
-DIST_DIR = dist
+DIST_DIR = build
 
 build:
 	cargo build --release
