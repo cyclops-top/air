@@ -1,4 +1,13 @@
 use serde::Serialize;
+use ratatui::{
+    layout::{Constraint, Direction, Layout},
+    style::{Color, Modifier, Style},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    Frame,
+};
+use crate::discovery::DiscoveryMsg;
+use std::collections::HashMap;
+use std::net::IpAddr;
 
 #[derive(Serialize)]
 pub struct FileEntry {
@@ -684,6 +693,117 @@ pub fn format_range(range: &str) -> String {
     } else {
         format!("{}-{}", start, end)
     }
+}
+
+pub struct DiscoverUI {
+    pub state: ListState,
+    pub nodes: Vec<DiscoveryMsg>,
+    pub node_map: HashMap<(IpAddr, u16), DiscoveryMsg>,
+}
+
+impl DiscoverUI {
+    pub fn new() -> Self {
+        Self {
+            state: ListState::default(),
+            nodes: Vec::new(),
+            node_map: HashMap::new(),
+        }
+    }
+
+    pub fn update_nodes(&mut self, node: DiscoveryMsg) {
+        let key = (node.ip, node.port);
+        if !self.node_map.contains_key(&key) {
+            self.node_map.insert(key, node.clone());
+            self.nodes.push(node);
+            if self.state.selected().is_none() {
+                self.state.select(Some(0));
+            }
+        }
+    }
+
+    pub fn next(&mut self) {
+        let i = match self.state.selected() {
+            Some(i) => {
+                if i >= self.nodes.len().saturating_sub(1) {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        if !self.nodes.is_empty() {
+            self.state.select(Some(i));
+        }
+    }
+
+    pub fn previous(&mut self) {
+        let i = match self.state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.nodes.len().saturating_sub(1)
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        if !self.nodes.is_empty() {
+            self.state.select(Some(i));
+        }
+    }
+
+    pub fn selected_node(&self) -> Option<&DiscoveryMsg> {
+        self.state.selected().and_then(|i| self.nodes.get(i))
+    }
+}
+
+pub fn render_discover(f: &mut Frame, ui: &mut DiscoverUI) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(1)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(3),
+        ])
+        .split(f.area());
+
+    // Title
+    let title = Paragraph::new("🔍 Air Service Discovery")
+        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .block(Block::default().borders(Borders::ALL));
+    f.render_widget(title, chunks[0]);
+
+    // List
+    let items: Vec<ListItem> = ui.nodes
+        .iter()
+        .map(|node| {
+            let content = format!(
+                " {:<20} | {:<15} | {:<5} | {:<5}",
+                node.name, node.ip, node.port, node.scheme
+            );
+            ListItem::new(content).style(Style::default().fg(Color::White))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title(" Available Nodes "))
+        .highlight_style(
+            Style::default()
+                .bg(Color::Cyan)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol(">> ");
+
+    f.render_stateful_widget(list, chunks[1], &mut ui.state);
+
+    // Footer
+    let footer = Paragraph::new(" [↑/↓] Navigate | [Enter] Open Address | [Q] Quit ")
+        .style(Style::default().fg(Color::Gray))
+        .block(Block::default().borders(Borders::ALL));
+    f.render_widget(footer, chunks[2]);
 }
 
 #[cfg(test)]

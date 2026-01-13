@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 mod cert;
 mod dashboard;
+mod discovery;
 mod fs_utils;
 mod handlers;
 mod logger;
@@ -13,6 +14,9 @@ mod view;
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
     /// Path to the directory to share
     #[arg(default_value = ".")]
     path: PathBuf,
@@ -26,9 +30,88 @@ struct Cli {
     https: bool,
 }
 
+#[derive(clap::Subcommand)]
+enum Commands {
+    /// Discover other Air nodes on the local network
+    Discover {
+        /// Duration to wait for discovery (seconds)
+        #[arg(short, long, default_value_t = 3)]
+        duration: u64,
+    },
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+
+    // Handle subcommands
+    if let Some(Commands::Discover { .. }) = cli.command {
+        crossterm::terminal::enable_raw_mode()?;
+        let mut stdout = std::io::stdout();
+        crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen)?;
+        let backend = ratatui::backend::CrosstermBackend::new(stdout);
+        let mut terminal = ratatui::Terminal::new(backend)?;
+
+        let mut ui = view::DiscoverUI::new();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(100);
+        
+        tokio::spawn(async move {
+            let _ = discovery::listen_discovery(tx).await;
+        });
+
+        use tokio_stream::StreamExt;
+        let mut event_reader = crossterm::event::EventStream::new();
+
+        let mut selected_url = None;
+
+        loop {
+            terminal.draw(|f| view::render_discover(f, &mut ui))?;
+
+            tokio::select! {
+                Some(msg) = rx.recv() => {
+                    ui.update_nodes(msg);
+                }
+                event = event_reader.next() => {
+                    if let Some(Ok(crossterm::event::Event::Key(key))) = event {
+                        if key.kind == crossterm::event::KeyEventKind::Press {
+                            match key.code {
+                                crossterm::event::KeyCode::Char('q') | crossterm::event::KeyCode::Char('Q') => break,
+                                crossterm::event::KeyCode::Up => ui.previous(),
+                                crossterm::event::KeyCode::Down => ui.next(),
+                                crossterm::event::KeyCode::Enter => {
+                                    if let Some(node) = ui.selected_node() {
+                                        selected_url = Some(format!("{}://{}:{}", node.scheme, node.ip, node.port));
+                                        break;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
+            }
+        }
+
+        crossterm::terminal::disable_raw_mode()?;
+        crossterm::execute!(
+            terminal.backend_mut(),
+            crossterm::terminal::LeaveAlternateScreen
+        )?;
+        terminal.show_cursor()?;
+
+        if let Some(url) = selected_url {
+            println!("Opening: {}", url);
+            #[cfg(target_os = "macos")]
+            let _ = std::process::Command::new("open").arg(&url).spawn();
+            #[cfg(target_os = "linux")]
+            let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+            #[cfg(target_os = "windows")]
+            let _ = std::process::Command::new("cmd").args(["/C", "start", &url]).spawn();
+        }
+
+        return Ok(());
+    }
 
     // 1. Resolve absolute path
     let root_path = match std::fs::canonicalize(&cli.path) {
@@ -46,7 +129,16 @@ async fn main() -> anyhow::Result<()> {
     // 3. Start server
     let (app_state, used_port) = server::start(cli.port, root_path, cli.https, lan_ip).await?;
 
-    // 4. Setup TUI (only if TTY)
+    // 4. Start discovery broadcast
+    let discovery_msg = discovery::DiscoveryMsg {
+        name: host_name.clone().unwrap_or_else(|| "Unknown".to_string()),
+        ip: lan_ip,
+        port: used_port,
+        scheme: if cli.https { "https".to_string() } else { "http".to_string() },
+    };
+    discovery::start_broadcast(discovery_msg).await;
+
+    // 5. Setup TUI (only if TTY)
     let is_tty = crossterm::tty::IsTty::is_tty(&std::io::stdout()) && 
                  crossterm::tty::IsTty::is_tty(&std::io::stdin());
     
