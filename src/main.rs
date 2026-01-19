@@ -106,6 +106,8 @@ async fn main() -> anyhow::Result<()> {
             let _ = std::process::Command::new("open").arg(&url).spawn();
             #[cfg(target_os = "linux")]
             let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+            #[cfg(target_os = "android")]
+            let _ = std::process::Command::new("am").args(["start", "-a", "android.intent.action.VIEW", "-d", &url]).spawn();
             #[cfg(target_os = "windows")]
             let _ = std::process::Command::new("cmd").args(["/C", "start", &url]).spawn();
         }

@@ -65,11 +65,12 @@ fn create_discovery_socket(port: u16) -> anyhow::Result<Socket> {
     let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
     
     // SO_REUSEADDR and SO_REUSEPORT are essential for multiple instances to listen on the same discovery port.
+    // On Windows, SO_REUSEADDR has different semantics, and SO_REUSEPORT is not available.
     #[cfg(not(windows))]
     socket.set_reuse_address(true)?;
     
     #[cfg(all(unix, not(target_os = "solaris"), not(target_os = "illumos")))]
-    socket.set_reuse_port(true)?;
+    let _ = socket.set_reuse_port(true); // Ignore error if not supported
     
     let addr: SockAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port).into();
     socket.bind(&addr)?;
