@@ -1,58 +1,46 @@
 <!DOCTYPE html>
-<html class="dark" lang="en"><head>
+<html class="dark" lang="en">
+<head>
     <meta charset="utf-8"/>
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-    <title>AIR - macOS Glassmorphism Browser</title>
-    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
-    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet"/>
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
-    <script id="tailwind-config">
-        tailwind.config = {
-            darkMode: "class",
-            theme: {
-                extend: {
-                    colors: {
-                        "primary": "#3b82f6",
-                        "accent-cyan": "#22d3ee",
-                        "accent-green": "#4ade80",
-                        "mac-bg-start": "#0f172a",
-                        "mac-bg-end": "#1e1b4b",
-                    },
-                    fontFamily: {
-                        "display": ["Space Grotesk", "sans-serif"],
-                        "mono": ["Space Mono", "monospace"]
-                    },
-                    borderRadius: {
-                        'macos': '16px',
-                    }
-                },
-            },
+    <title>AIR - Offline macOS Browser</title>
+    <style>
+        /* 1. 基础重置与变量 */
+        *, ::before, ::after { box-sizing: border-box; border-width: 0; border-style: solid; }
+        :root {
+            --primary: #3b82f6;
+            --accent-cyan: #22d3ee;
+            --accent-green: #4ade80;
+            --text-main: #0f172a;
+            --text-dim: #64748b;
         }
-    </script>
-    <style type="text/tailwindcss">
+        .dark {
+            --text-main: #f1f5f9;
+            --text-dim: #94a3b8;
+        }
+
+        /* 2. 动态背景与虚化光斑 (Bokeh) */
         body {
-            @apply transition-colors duration-500 bg-slate-50 dark:bg-[#0f172a];
-            background-image: radial-gradient(circle at top left, #f1f5f9, #e2e8f0);
+            margin: 0;
             height: 100vh;
             overflow: hidden;
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: radial-gradient(circle at top left, #f1f5f9, #e2e8f0);
+            color: var(--text-main);
+            transition: background 0.5s ease;
         }
         .dark body {
-            background-image: radial-gradient(circle at top left, #1e293b, #0f172a);
+            background: radial-gradient(circle at top left, #1e293b, #0f172a);
         }
+
         .bokeh {
-            position: fixed;
-            width: 500px;
-            height: 500px;
-            border-radius: 50%;
-            filter: blur(120px);
-            opacity: 0.15;
-            z-index: -1;
-            pointer-events: none;
+            position: fixed; width: 500px; height: 500px; border-radius: 50%;
+            filter: blur(120px); opacity: 0.15; z-index: -1; pointer-events: none;
         }
+
+        /* 3. 核心磨砂玻璃组件 */
         .glass-container {
-            backdrop-filter: blur(40px);
-            -webkit-backdrop-filter: blur(40px);
+            backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px);
             background: rgba(255, 255, 255, 0.4);
             border: 1px solid rgba(0, 0, 0, 0.05);
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.1), inset 0 1px 1px rgba(255, 255, 255, 0.5);
@@ -62,9 +50,9 @@
             border: 1px solid rgba(255, 255, 255, 0.12);
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.1);
         }
+
         .glass-header {
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
             background: rgba(255, 255, 255, 0.8);
             border-bottom: 1px solid rgba(0, 0, 0, 0.05);
         }
@@ -72,273 +60,119 @@
             background: rgba(15, 23, 42, 0.6);
             border-bottom: 1px solid rgba(255, 255, 255, 0.08);
         }
+
         .glass-button {
-            background: rgba(0, 0, 0, 0.05);
-            border: 1px solid rgba(0, 0, 0, 0.05);
-            backdrop-filter: blur(10px);
-            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            background: rgba(0, 0, 0, 0.05); border: 1px solid rgba(0, 0, 0, 0.05);
+            backdrop-filter: blur(10px); cursor: pointer; display: flex; align-items: center; justify-content: center;
+            border-radius: 16px; color: inherit; transition: all 0.2s;
         }
-        .dark .glass-button {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-        .glass-button:hover {
-            background: rgba(0, 0, 0, 0.1);
-            transform: translateY(-1px);
-        }
+        .dark .glass-button { background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .glass-button:hover { background: rgba(0, 0, 0, 0.1); transform: translateY(-1px); }
         .dark .glass-button:hover {
-            background: rgba(255, 255, 255, 0.15);
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.15); border: 1px solid rgba(255, 255, 255, 0.2);
             box-shadow: 0 0 15px rgba(59, 130, 246, 0.3);
         }
-        .cyber-text {
-            letter-spacing: 0.1em;
-            font-variant-numeric: tabular-nums;
-        }
-        .status-dot {
-            box-shadow: 0 0 10px rgba(74, 222, 128, 0.4);
-        }
-        .custom-scrollbar::-webkit-scrollbar {
-            width: 6px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-            background: rgba(0, 0, 0, 0.02);
-            border-radius: 10px;
-        }
-        .dark .custom-scrollbar::-webkit-scrollbar-track {
-            background: rgba(255, 255, 255, 0.02);
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-            background: rgba(59, 130, 246, 0.2);
-            border-radius: 10px;
-            border: 1px solid rgba(0, 0, 0, 0.05);
-        }
-        .dark .custom-scrollbar::-webkit-scrollbar-thumb {
-            border: 1px solid rgba(255, 255, 255, 0.05);
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-            background: rgba(59, 130, 246, 0.4);
-        }
-        .theme-toggle-glow {
-            box-shadow: 0 0 12px rgba(34, 211, 238, 0.3);
-        }
+
+        /* 4. 辅助样式 */
+        .flex { display: flex; }
+        .flex-col { flex-direction: column; }
+        .items-center { align-items: center; }
+        .justify-between { justify-content: space-between; }
+        .flex-1 { flex: 1; }
+        .px-8 { padding-left: 2rem; padding-right: 2rem; }
+        .py-4 { padding-top: 1rem; padding-bottom: 1rem; }
+        .rounded-macos { border-radius: 16px; }
+        .font-mono { font-family: ui-monospace, monospace; }
+
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-green); box-shadow: 0 0 10px rgba(74, 222, 128, 0.4); }
+        @keyframes pulse { 50% { opacity: .5; } }
+        .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+
+        /* 表格控制 */
+        table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        th { text-align: left; padding: 1rem 2rem; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); }
+        td { padding: 1.5rem 2rem; border-bottom: 1px solid rgba(128,128,128,0.1); }
+        tr:hover { background: rgba(128, 128, 128, 0.05); }
+
+        .svg-icon { width: 20px; height: 20px; fill: currentColor; }
+        .svg-icon-lg { width: 24px; height: 24px; fill: currentColor; }
+
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(59, 130, 246, 0.2); border-radius: 10px; }
     </style>
 </head>
-<body class="font-display text-slate-900 dark:text-slate-200 selection:bg-primary/40 overflow-hidden">
-<div class="bokeh top-[-100px] left-[-100px] bg-blue-500/20 dark:bg-blue-500"></div>
-<div class="bokeh bottom-[-100px] right-[-100px] bg-purple-600/20 dark:bg-purple-600"></div>
-<div class="bokeh top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-cyan-500 opacity-[0.05]"></div>
+<body>
+<div class="bokeh" style="top:-100px; left:-100px; background: rgba(59, 130, 246, 0.2);"></div>
+<div class="bokeh" style="bottom:-100px; right:-100px; background: rgba(147, 51, 234, 0.2);"></div>
+
 <div class="flex flex-col h-screen w-full relative">
-    <header class="glass-header flex-shrink-0 z-50 w-full px-8 py-4 lg:px-12 flex items-center justify-between">
-        <div class="flex items-center gap-10">
-            <div class="flex items-center gap-3">
-                <div class="size-9 bg-primary flex items-center justify-center rounded-macos shadow-lg shadow-primary/20">
-                    <span class="material-symbols-outlined text-white text-xl">air</span>
+    <header class="glass-header flex items-center justify-between px-8 py-4" style="z-index: 50;">
+        <div class="flex items-center" style="gap: 2.5rem;">
+            <div class="flex items-center" style="gap: 0.75rem;">
+                <div style="width: 36px; height: 36px; background: var(--primary); display: flex; align-items: center; justify-content: center; border-radius: 12px; color: white;">
+                    <svg class="svg-icon" viewBox="0 -960 960 960"><path d="M480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Z"/></svg>
                 </div>
-                <h1 class="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">AIR</h1>
+                <h1 style="font-size: 1.5rem; font-weight: 700; margin: 0;">AIR</h1>
             </div>
-            <div class="hidden md:flex items-center gap-6">
-                <div class="flex items-center gap-2.5 px-3 py-1.5 bg-slate-900/5 dark:bg-white/5 rounded-full border border-slate-900/10 dark:border-white/10">
-                    <div class="size-2 rounded-full bg-accent-green status-dot animate-pulse"></div>
-                    <span class="text-[10px] font-bold uppercase tracking-widest text-accent-green">System Online</span>
-                </div>
-                <div class="flex items-center gap-2 text-xs font-medium text-slate-500 dark:text-slate-400 font-mono">
-                    <span class="material-symbols-outlined text-base text-accent-cyan">sensors</span>
-                    <span>192.168.1.104</span>
+            <div class="flex items-center" style="gap: 1.5rem;">
+                <div class="flex items-center" style="gap: 0.6rem; padding: 0.4rem 0.8rem; background: rgba(128,128,128,0.1); border-radius: 999px; border: 1px solid rgba(128,128,128,0.1);">
+                    <div class="status-dot animate-pulse"></div>
+                    <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--accent-green); letter-spacing: 0.1em;">System Online</span>
                 </div>
             </div>
         </div>
-        <div class="flex items-center gap-4">
-            <div class="hidden lg:flex flex-col items-end mr-2">
-                <span class="text-[9px] uppercase tracking-widest text-slate-400 dark:text-slate-500 font-bold">Node Identity</span>
-                <span class="text-xs font-mono text-slate-600 dark:text-slate-300">ALPHA_V3_GRID</span>
-            </div>
-            <button class="glass-button theme-toggle-glow size-10 rounded-macos flex items-center justify-center text-slate-700 dark:text-accent-cyan transition-colors" onclick="document.documentElement.classList.toggle('dark')">
-                <span class="material-symbols-outlined text-xl block dark:hidden">light_mode</span>
-                <span class="material-symbols-outlined text-xl hidden dark:block">dark_mode</span>
+
+        <div class="flex items-center" style="gap: 1rem;">
+            <button class="glass-button" style="width: 40px; height: 40px;" onclick="document.documentElement.classList.toggle('dark')">
+                <svg class="svg-icon" viewBox="0 -960 960 960"><path d="M480-120q-150 0-255-105T120-480q0-150 105-255t255-105q14 0 27.5 1t26.5 3q-41 29-65.5 75.5T344-654q0 90 63 153t153 63q52 0 99-24.5t75-65.5q2 13 3 26.5t1 27.5q0 150-105 255T480-120Z"/></svg>
             </button>
-            <button class="glass-button size-10 rounded-macos flex items-center justify-center">
-                <span class="material-symbols-outlined text-xl text-slate-700 dark:text-slate-200">terminal</span>
-            </button>
-            <button class="glass-button size-10 rounded-macos flex items-center justify-center">
-                <span class="material-symbols-outlined text-xl text-slate-700 dark:text-slate-200">settings</span>
+            <button class="glass-button" style="width: 40px; height: 40px;">
+                <svg class="svg-icon" viewBox="0 -960 960 960"><path d="M160-160v-640h640v640H160Zm80-80h480v-480H240v480Zm40-280h120v-40H280v40Zm0-80h200v-40H280v40Zm0 240h280v-40H280v40Z"/></svg>
             </button>
         </div>
     </header>
-    <main class="flex-1 flex flex-col items-center px-8 lg:px-12 min-h-0">
-        <div class="w-full max-w-6xl flex flex-col h-full">
-            <nav class="flex items-center gap-2 px-1 py-8 flex-shrink-0">
-                <div class="flex items-center gap-2 font-medium text-sm text-slate-500 dark:text-slate-400">
-                    <button class="hover:text-slate-900 dark:hover:text-white transition-colors">AIR</button>
-                    <span class="material-symbols-outlined text-base opacity-40">chevron_right</span>
-                    <button class="hover:text-slate-900 dark:hover:text-white transition-colors">Root</button>
-                    <span class="material-symbols-outlined text-base opacity-40">chevron_right</span>
-                    <button class="hover:text-slate-900 dark:hover:text-white transition-colors">Documents</button>
-                    <span class="material-symbols-outlined text-base opacity-40">chevron_right</span>
-                    <span class="text-slate-900 dark:text-white font-semibold px-2 py-0.5 bg-slate-900/10 dark:bg-white/10 rounded-md">Project_X</span>
+
+    <main class="flex-1 flex flex-col items-center px-8" style="min-height: 0;">
+        <div style="width: 100%; max-width: 1152px; height: 100%; display: flex; flex-direction: column;">
+            <nav class="flex items-center py-8">
+                <div class="flex items-center" style="gap: 0.5rem; font-size: 14px; color: var(--text-dim);">
+                    <span>AIR</span> <span style="opacity:0.4;">/</span>
+                    <span>Root</span> <span style="opacity:0.4;">/</span>
+                    <span style="color: var(--text-main); font-weight: 600; background: rgba(128,128,128,0.1); padding: 2px 8px; border-radius: 6px;">Project_X</span>
                 </div>
             </nav>
-            <div class="flex-1 min-h-0 mb-4">
-                <section class="glass-container rounded-macos h-full flex flex-col overflow-hidden">
-                    <div class="flex-shrink-0 bg-slate-900/[0.02] dark:bg-white/[0.04] border-b border-slate-900/5 dark:border-white/5">
-                        <table class="w-full border-collapse table-fixed">
+
+            <div class="flex-1 min-h-0" style="margin-bottom: 1rem;">
+                <section class="glass-container rounded-macos flex flex-col h-full overflow-hidden">
+                    <div style="background: rgba(128,128,128,0.05); border-bottom: 1px solid rgba(128,128,128,0.1);">
+                        <table>
                             <thead>
-                            <tr class="text-left">
-                                <th class="px-8 py-4 text-[11px] uppercase tracking-widest text-slate-500 dark:text-slate-400 font-bold w-1/2">Filename</th>
-                                <th class="px-8 py-4 text-[11px] uppercase tracking-widest text-slate-500 dark:text-slate-400 font-bold w-[15%]">Size</th>
-                                <th class="px-8 py-4 text-[11px] uppercase tracking-widest text-slate-500 dark:text-slate-400 font-bold w-[20%]">Last Sync</th>
-                                <th class="px-8 py-4 text-[11px] uppercase tracking-widest text-slate-500 dark:text-slate-400 font-bold text-right w-[15%]">Action</th>
+                            <tr>
+                                <th style="width: 50%;">Filename</th>
+                                <th style="width: 15%;">Size</th>
+                                <th style="width: 20%;">Last Sync</th>
+                                <th style="width: 15%; text-align: right;">Action</th>
                             </tr>
                             </thead>
                         </table>
                     </div>
                     <div class="flex-1 overflow-y-auto custom-scrollbar">
-                        <table class="w-full border-collapse table-fixed">
-                            <tbody class="divide-y divide-slate-900/[0.04] dark:divide-white/[0.04]">
-                            <tr class="group hover:bg-slate-900/[0.02] dark:hover:bg-white/[0.03] transition-colors duration-200">
-                                <td class="px-8 py-6 w-1/2">
-                                    <div class="flex items-center gap-4">
-                                        <div class="size-10 flex items-center justify-center rounded-macos bg-blue-500/10 text-primary">
-                                            <span class="material-symbols-outlined text-2xl">description</span>
+                        <table>
+                            <tbody>
+                            <tr>
+                                <td style="width: 50%;">
+                                    <div class="flex items-center" style="gap: 1rem;">
+                                        <div style="width: 40px; height: 40px; background: rgba(59, 130, 246, 0.1); color: var(--primary); display: flex; align-items: center; justify-content: center; border-radius: 12px;">
+                                            <svg class="svg-icon-lg" viewBox="0 -960 960 960"><path d="M320-240h320v-80H320v80Zm0-160h320v-80H320v80ZM240-80q-33 0-56.5-23.5T160-160v-640q0-33 23.5-56.5T240-880h320l240 240v480q0 33-23.5 56.5T720-80H240Z"/></svg>
                                         </div>
-                                        <span class="text-[17px] text-slate-900 dark:text-white font-medium truncate">orbital_schematics_rev4.arc</span>
+                                        <span style="font-size: 17px; font-weight: 500;">orbital_schematics_rev4.arc</span>
                                     </div>
                                 </td>
-                                <td class="px-8 py-6 w-[15%]">
-                                    <span class="text-[15px] text-slate-600 dark:text-slate-300 font-mono">1.24 GB</span>
-                                </td>
-                                <td class="px-8 py-6 w-[20%]">
-                                    <span class="text-sm text-slate-500 dark:text-slate-400 font-mono">2024.10.24 <span class="text-slate-300 dark:text-slate-600 px-1">/</span> 14:02</span>
-                                </td>
-                                <td class="px-8 py-6 text-right w-[15%]">
-                                    <button class="glass-button size-10 rounded-macos inline-flex items-center justify-center text-primary">
-                                        <span class="material-symbols-outlined text-xl">download</span>
-                                    </button>
-                                </td>
-                            </tr>
-                            <tr class="group hover:bg-slate-900/[0.02] dark:hover:bg-white/[0.03] transition-colors duration-200">
-                                <td class="px-8 py-6 w-1/2">
-                                    <div class="flex items-center gap-4">
-                                        <div class="size-10 flex items-center justify-center rounded-macos bg-emerald-500/10 text-accent-green">
-                                            <span class="material-symbols-outlined text-2xl">analytics</span>
-                                        </div>
-                                        <span class="text-[17px] text-slate-900 dark:text-white font-medium truncate">cryo_logs_v2_core.log</span>
-                                    </div>
-                                </td>
-                                <td class="px-8 py-6 w-[15%]">
-                                    <span class="text-[15px] text-slate-600 dark:text-slate-300 font-mono">412 KB</span>
-                                </td>
-                                <td class="px-8 py-6 w-[20%]">
-                                    <span class="text-sm text-slate-500 dark:text-slate-400 font-mono">2024.10.24 <span class="text-slate-300 dark:text-slate-600 px-1">/</span> 13:55</span>
-                                </td>
-                                <td class="px-8 py-6 text-right w-[15%]">
-                                    <button class="glass-button size-10 rounded-macos inline-flex items-center justify-center text-primary">
-                                        <span class="material-symbols-outlined text-xl">download</span>
-                                    </button>
-                                </td>
-                            </tr>
-                            <tr class="group hover:bg-slate-900/[0.02] dark:hover:bg-white/[0.03] transition-colors duration-200">
-                                <td class="px-8 py-6 w-1/2">
-                                    <div class="flex items-center gap-4">
-                                        <div class="size-10 flex items-center justify-center rounded-macos bg-cyan-500/10 text-accent-cyan">
-                                            <span class="material-symbols-outlined text-2xl">database</span>
-                                        </div>
-                                        <span class="text-[17px] text-slate-900 dark:text-white font-medium truncate">engine_thrust_vectors.csv</span>
-                                    </div>
-                                </td>
-                                <td class="px-8 py-6 w-[15%]">
-                                    <span class="text-[15px] text-slate-600 dark:text-slate-300 font-mono">892 MB</span>
-                                </td>
-                                <td class="px-8 py-6 w-[20%]">
-                                    <span class="text-sm text-slate-500 dark:text-slate-400 font-mono">2024.10.24 <span class="text-slate-300 dark:text-slate-600 px-1">/</span> 12:30</span>
-                                </td>
-                                <td class="px-8 py-6 text-right w-[15%]">
-                                    <button class="glass-button size-10 rounded-macos inline-flex items-center justify-center text-primary">
-                                        <span class="material-symbols-outlined text-xl">download</span>
-                                    </button>
-                                </td>
-                            </tr>
-                            <tr class="group hover:bg-slate-900/[0.02] dark:hover:bg-white/[0.03] transition-colors duration-200">
-                                <td class="px-8 py-6 w-1/2">
-                                    <div class="flex items-center gap-4">
-                                        <div class="size-10 flex items-center justify-center rounded-macos bg-indigo-500/10 text-indigo-400">
-                                            <span class="material-symbols-outlined text-2xl">map</span>
-                                        </div>
-                                        <span class="text-[17px] text-slate-900 dark:text-white font-medium truncate">sector_7_star_map.svg</span>
-                                    </div>
-                                </td>
-                                <td class="px-8 py-6 w-[15%]">
-                                    <span class="text-[15px] text-slate-600 dark:text-slate-300 font-mono">15.6 MB</span>
-                                </td>
-                                <td class="px-8 py-6 w-[20%]">
-                                    <span class="text-sm text-slate-500 dark:text-slate-400 font-mono">2024.10.24 <span class="text-slate-300 dark:text-slate-600 px-1">/</span> 11:15</span>
-                                </td>
-                                <td class="px-8 py-6 text-right w-[15%]">
-                                    <button class="glass-button size-10 rounded-macos inline-flex items-center justify-center text-primary">
-                                        <span class="material-symbols-outlined text-xl">download</span>
-                                    </button>
-                                </td>
-                            </tr>
-                            <tr class="group hover:bg-slate-900/[0.02] dark:hover:bg-white/[0.03] transition-colors duration-200">
-                                <td class="px-8 py-6 w-1/2">
-                                    <div class="flex items-center gap-4">
-                                        <div class="size-10 flex items-center justify-center rounded-macos bg-rose-500/10 text-rose-400">
-                                            <span class="material-symbols-outlined text-2xl">verified_user</span>
-                                        </div>
-                                        <span class="text-[17px] text-slate-900 dark:text-white font-medium truncate">access_protocols_delta.key</span>
-                                    </div>
-                                </td>
-                                <td class="px-8 py-6 w-[15%]">
-                                    <span class="text-[15px] text-slate-600 dark:text-slate-300 font-mono">4 KB</span>
-                                </td>
-                                <td class="px-8 py-6 w-[20%]">
-                                    <span class="text-sm text-slate-500 dark:text-slate-400 font-mono">2024.10.24 <span class="text-slate-300 dark:text-slate-600 px-1">/</span> 10:45</span>
-                                </td>
-                                <td class="px-8 py-6 text-right w-[15%]">
-                                    <button class="glass-button size-10 rounded-macos inline-flex items-center justify-center text-primary">
-                                        <span class="material-symbols-outlined text-xl">download</span>
-                                    </button>
-                                </td>
-                            </tr>
-                            <tr class="group hover:bg-slate-900/[0.02] dark:hover:bg-white/[0.03] transition-colors duration-200">
-                                <td class="px-8 py-6 w-1/2">
-                                    <div class="flex items-center gap-4">
-                                        <div class="size-10 flex items-center justify-center rounded-macos bg-orange-500/10 text-orange-400">
-                                            <span class="material-symbols-outlined text-2xl">video_library</span>
-                                        </div>
-                                        <span class="text-[17px] text-slate-900 dark:text-white font-medium truncate">hull_stress_test_recording.mp4</span>
-                                    </div>
-                                </td>
-                                <td class="px-8 py-6 w-[15%]">
-                                    <span class="text-[15px] text-slate-600 dark:text-slate-300 font-mono">2.8 GB</span>
-                                </td>
-                                <td class="px-8 py-6 w-[20%]">
-                                    <span class="text-sm text-slate-500 dark:text-slate-400 font-mono">2024.10.24 <span class="text-slate-300 dark:text-slate-600 px-1">/</span> 09:20</span>
-                                </td>
-                                <td class="px-8 py-6 text-right w-[15%]">
-                                    <button class="glass-button size-10 rounded-macos inline-flex items-center justify-center text-primary">
-                                        <span class="material-symbols-outlined text-xl">download</span>
-                                    </button>
-                                </td>
-                            </tr>
-                            <tr class="group hover:bg-slate-900/[0.02] dark:hover:bg-white/[0.03] transition-colors duration-200">
-                                <td class="px-8 py-6 w-1/2">
-                                    <div class="flex items-center gap-4">
-                                        <div class="size-10 flex items-center justify-center rounded-macos bg-slate-500/10 text-slate-400">
-                                            <span class="material-symbols-outlined text-2xl">folder</span>
-                                        </div>
-                                        <span class="text-[17px] text-slate-900 dark:text-white font-medium truncate">backup_archives</span>
-                                    </div>
-                                </td>
-                                <td class="px-8 py-6 w-[15%]">
-                                    <span class="text-[15px] text-slate-600 dark:text-slate-300 font-mono">--</span>
-                                </td>
-                                <td class="px-8 py-6 w-[20%]">
-                                    <span class="text-sm text-slate-500 dark:text-slate-400 font-mono">2024.10.23 <span class="text-slate-300 dark:text-slate-600 px-1">/</span> 18:40</span>
-                                </td>
-                                <td class="px-8 py-6 text-right w-[15%]">
-                                    <button class="glass-button size-10 rounded-macos inline-flex items-center justify-center text-primary">
-                                        <span class="material-symbols-outlined text-xl">open_in_new</span>
+                                <td style="width: 15%; font-family: monospace;">1.24 GB</td>
+                                <td style="width: 20%; font-family: monospace; font-size: 13px; opacity: 0.7;">2024.10.24 / 14:02</td>
+                                <td style="width: 15%; text-align: right;">
+                                    <button class="glass-button" style="width: 36px; height: 36px; margin-left: auto; color: var(--primary);">
+                                        <svg style="width:18px; height:18px;" viewBox="0 -960 960 960"><path d="M480-320 280-520l56-58 104 104v-326h80v326l104-104 56 58-200 200ZM240-160q-33 0-56.5-23.5T160-240v-120h80v120h480v-120h80v120q0 33-23.5 56.5T720-160H240Z"/></svg>
                                     </button>
                                 </td>
                             </tr>
@@ -347,18 +181,13 @@
                     </div>
                 </section>
             </div>
-            <footer class="flex-shrink-0 flex justify-between items-center py-6 px-2 text-slate-400 dark:text-slate-500 bg-transparent">
-                <div class="flex items-center gap-4 text-[10px] cyber-text font-bold uppercase tracking-widest">
-                    <span>Active Node: 0x8F2</span>
-                    <span class="opacity-30">|</span>
-                    <span>Secure Protocol v4.1</span>
-                </div>
-                <div class="text-[10px] cyber-text font-bold uppercase tracking-widest opacity-60">
-                    AIR Browser Engine © 2024
-                </div>
-            </footer>
         </div>
     </main>
-</div>
 
-</body></html>
+    <footer class="px-8 py-6 flex justify-between items-center" style="font-size: 10px; font-weight: 700; letter-spacing: 0.15em; color: var(--text-dim); opacity: 0.8;">
+        <div>ACTIVE NODE: 0x8F2 | SECURE PROTOCOL V4.1</div>
+        <div>AIR BROWSER ENGINE © 2024</div>
+    </footer>
+</div>
+</body>
+</html>
