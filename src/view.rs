@@ -5,8 +5,25 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Frame,
 };
-use crate::discovery::DiscoveryMsg;
+use crate::domain::models as domain_models;
 use std::collections::HashMap;
+
+pub fn render_html_domain(listing: &domain_models::DirectoryListing) -> String {
+    let items = listing.items.iter().map(|i| FileEntry {
+        name: i.name.clone(),
+        is_dir: i.is_dir,
+        size: i.size,
+        mod_time: i.mod_time.clone(),
+    }).collect();
+
+    let view_listing = DirectoryListing {
+        current_path: listing.current_path.clone(),
+        items,
+        lan_ip: listing.lan_ip.clone(),
+        port: listing.port,
+    };
+    render_html(&view_listing)
+}
 
 #[derive(Serialize)]
 pub struct FileEntry {
@@ -35,7 +52,6 @@ pub fn render_html(listing: &DirectoryListing) -> String {
     html.push_str("<link rel='icon' type='image/svg+xml' href='/favicon.ico'>");
     html.push_str("<title>AIR - Cloud Explorer</title>");
     
-    // Theme Switch Logic
     html.push_str(r##"
         <script>
             (function() {
@@ -53,7 +69,6 @@ pub fn render_html(listing: &DirectoryListing) -> String {
         </script>
     "##);
 
-    // CSS Block
     html.push_str("<style>");
     html.push_str(r##"
         *, ::before, ::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -334,29 +349,15 @@ pub fn format_duration(duration: std::time::Duration) -> String {
     format!("{:02}:{:02}:{:02}", s/3600, (s%3600)/60, s%60)
 }
 
-pub fn format_range(range: &str) -> String {
-    let parts: Vec<&str> = range.split('-').collect();
-    if parts.len() != 2 { return range.to_string(); }
-    let f = |p: &str| {
-        if let Ok(b) = p.parse::<u64>() {
-            if b >= 1073741824 { format!("{:.1}G", b as f64 / 1073741824.0) }
-            else if b >= 1048576 { format!("{:.1}M", b as f64 / 1048576.0) }
-            else if b >= 1024 { format!("{:.1}K", b as f64 / 1024.0) }
-            else { b.to_string() }
-        } else { p.to_string() }
-    };
-    format!("{}-{}", f(parts[0]), f(parts[1]))
-}
-
 pub struct DiscoverUI {
     pub state: ListState,
-    pub nodes: Vec<DiscoveryMsg>,
-    pub node_map: HashMap<String, DiscoveryMsg>,
+    pub nodes: Vec<domain_models::DiscoveryMsg>,
+    pub node_map: HashMap<String, domain_models::DiscoveryMsg>,
 }
 
 impl DiscoverUI {
     pub fn new() -> Self { Self { state: ListState::default(), nodes: Vec::new(), node_map: HashMap::new() } }
-    pub fn update_nodes(&mut self, node: DiscoveryMsg) {
+    pub fn update_nodes(&mut self, node: domain_models::DiscoveryMsg) {
         let sid = self.selected_node().map(|n| n.id.clone());
         if !node.is_online {
             if self.node_map.contains_key(&node.id) { self.node_map.remove(&node.id); self.nodes.retain(|n| n.id != node.id); }
@@ -374,7 +375,7 @@ impl DiscoverUI {
     }
     pub fn next(&mut self) { if !self.nodes.is_empty() { let i = match self.state.selected() { Some(i) => if i >= self.nodes.len()-1 {0} else {i+1}, None => 0 }; self.state.select(Some(i)); } }
     pub fn previous(&mut self) { if !self.nodes.is_empty() { let i = match self.state.selected() { Some(i) => if i == 0 {self.nodes.len()-1} else {i-1}, None => 0 }; self.state.select(Some(i)); } }
-    pub fn selected_node(&self) -> Option<&DiscoveryMsg> { self.state.selected().and_then(|i| self.nodes.get(i)) }
+    pub fn selected_node(&self) -> Option<&domain_models::DiscoveryMsg> { self.state.selected().and_then(|i| self.nodes.get(i)) }
 }
 
 pub fn render_discover(f: &mut Frame, ui: &mut DiscoverUI) {
@@ -395,5 +396,4 @@ pub fn render_discover(f: &mut Frame, ui: &mut DiscoverUI) {
 mod tests {
     use super::*;
     #[test] fn test_format_duration() { assert_eq!(format_duration(std::time::Duration::from_secs(3661)), "01:01:01"); }
-    #[test] fn test_format_range() { assert_eq!(format_range("0-1024"), "0-1.0K"); }
 }

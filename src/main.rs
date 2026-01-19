@@ -1,40 +1,42 @@
 use clap::Parser;
 use local_ip_address::local_ip;
 use std::path::PathBuf;
+use std::sync::Arc;
+use tokio_stream::StreamExt;
+
+mod domain;
+mod application;
+mod infrastructure;
 
 mod cert;
 mod dashboard;
-mod discovery;
 mod fs_utils;
-mod handlers;
-mod logger;
-mod server;
 mod view;
+
+use crate::application::file_service::FileService;
+use crate::application::discovery_manager::DiscoveryManager;
+use crate::infrastructure::discovery::mdns::MdnsDiscoveryProvider;
+use crate::infrastructure::filesystem::local::{LocalFileRepository, MmapCache};
+use crate::infrastructure::ui::html_renderer::HtmlRenderer;
+use crate::infrastructure::server::start_server;
+use crate::domain::models::{AppState, Stats};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
-
-    /// Path to the directory to share
     #[arg(default_value = ".")]
     path: PathBuf,
-
-    /// Port to listen on. If not provided, a random port between 10000-65535 will be used.
     #[arg(short, long)]
     port: Option<u16>,
-
-    /// Enable HTTPS with a self-signed certificate
     #[arg(long, default_value_t = false)]
     https: bool,
 }
 
 #[derive(clap::Subcommand)]
 enum Commands {
-    /// Discover other Air nodes on the local network
     Discover {
-        /// Duration to wait for discovery (seconds)
         #[arg(short, long, default_value_t = 3)]
         duration: u64,
     },
@@ -44,7 +46,16 @@ enum Commands {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    // Handle subcommands
+    // 1. Initialize Infrastructure
+    let mmap_cache = Arc::new(MmapCache::new());
+    let file_repo = Arc::new(LocalFileRepository::new(mmap_cache));
+    let discovery_provider = Arc::new(MdnsDiscoveryProvider::new()?);
+    let ui_renderer = Arc::new(HtmlRenderer::new());
+
+    // 2. Initialize Application Services
+    let discovery_manager = Arc::new(DiscoveryManager::new(discovery_provider));
+
+    // --- Discover Mode ---
     if let Some(Commands::Discover { .. }) = cli.command {
         crossterm::terminal::enable_raw_mode()?;
         let mut stdout = std::io::stdout();
@@ -56,20 +67,14 @@ async fn main() -> anyhow::Result<()> {
         let (tx, mut rx) = tokio::sync::mpsc::channel(100);
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         
-        tokio::spawn(async move {
-            let _ = discovery::listen_discovery(tx, shutdown_rx).await;
-        });
+        let dm_clone = discovery_manager.clone();
+        tokio::spawn(async move { let _ = dm_clone.start_discovery(tx, shutdown_rx).await; });
 
-        use tokio_stream::StreamExt;
         let mut event_reader = crossterm::event::EventStream::new();
-
         loop {
             terminal.draw(|f| view::render_discover(f, &mut ui))?;
-
             tokio::select! {
-                Some(msg) = rx.recv() => {
-                    ui.update_nodes(msg);
-                }
+                Some(msg) = rx.recv() => { ui.update_nodes(msg); }
                 event = event_reader.next() => {
                     if let Some(Ok(crossterm::event::Event::Key(key))) = event {
                         if key.kind == crossterm::event::KeyEventKind::Press {
@@ -80,14 +85,9 @@ async fn main() -> anyhow::Result<()> {
                                 crossterm::event::KeyCode::Enter => {
                                     if let Some(node) = ui.selected_node() {
                                         let url = format!("{}://{}:{}", node.scheme, node.ip, node.port);
-                                        #[cfg(target_os = "macos")]
-                                        let _ = std::process::Command::new("open").arg(&url).spawn();
-                                        #[cfg(target_os = "linux")]
-                                        let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
-                                        #[cfg(target_os = "android")]
-                                        let _ = std::process::Command::new("am").args(["start", "-a", "android.intent.action.VIEW", "-d", &url]).spawn();
-                                        #[cfg(target_os = "windows")]
-                                        let _ = std::process::Command::new("cmd").args(["/C", "start", &url]).spawn();
+                                        #[cfg(target_os = "macos")] let _ = std::process::Command::new("open").arg(&url).spawn();
+                                        #[cfg(target_os = "linux")] let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+                                        #[cfg(target_os = "windows")] let _ = std::process::Command::new("cmd").args(["/C", "start", &url]).spawn();
                                     }
                                 }
                                 _ => {}
@@ -98,61 +98,75 @@ async fn main() -> anyhow::Result<()> {
                 _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
             }
         }
-
         let _ = shutdown_tx.send(());
-
         crossterm::terminal::disable_raw_mode()?;
-        crossterm::execute!(
-            terminal.backend_mut(),
-            crossterm::terminal::LeaveAlternateScreen
-        )?;
+        crossterm::execute!(terminal.backend_mut(), crossterm::terminal::LeaveAlternateScreen)?;
         terminal.show_cursor()?;
-
         std::process::exit(0);
     }
 
-    // 1. Resolve absolute path
-    let root_path = match std::fs::canonicalize(&cli.path) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("Error: Cannot access path '{}': {}", cli.path.display(), e);
-            std::process::exit(1);
-        }
-    };
+    // --- Share Mode ---
+    let root_path = std::fs::canonicalize(&cli.path).unwrap_or_else(|e| {
+        eprintln!("Error: Cannot access path: {}", e);
+        std::process::exit(1);
+    });
 
-    // 2. Get LAN IP and Hostname
     let lan_ip = local_ip().unwrap_or_else(|_| "127.0.0.1".parse().unwrap());
     let host_name = hostname::get().ok().and_then(|h| h.into_string().ok());
 
-    // 3. Start server
-    let (app_state, used_port) = server::start(cli.port, root_path, cli.https, lan_ip).await?;
+    let app_state = Arc::new(AppState {
+        root_path: root_path.clone(),
+        stats: Arc::new(Stats::default()),
+        enable_https: cli.https,
+        lan_ip: lan_ip.to_string(),
+        port: 0,
+    });
 
-    // 4. Start discovery broadcast
-    let instance_id = rand::random::<u32>().to_string();
-    let discovery_msg = discovery::DiscoveryMsg {
-        id: instance_id,
+    let file_service = Arc::new(FileService::new(file_repo, app_state.clone()));
+
+    // Start Start start_server
+    let used_port = start_server(
+        cli.port,
+        root_path,
+        cli.https,
+        lan_ip,
+        file_service,
+        ui_renderer,
+        app_state.clone()
+    ).await?;
+
+    let discovery_msg = domain::models::DiscoveryMsg {
+        id: rand::random::<u32>().to_string(),
         name: host_name.clone().unwrap_or_else(|| "Unknown".to_string()),
         ip: lan_ip,
         port: used_port,
         scheme: if cli.https { "https".to_string() } else { "http".to_string() },
         is_online: true,
     };
-    
-    // Hold the daemon and the fullname for cleanup
-    let (_mdns_daemon, fullname) = discovery::register_service(&discovery_msg)?;
+    let fullname = discovery_manager.register_service(&discovery_msg)?;
 
-    // 5. Setup TUI (only if TTY)
-    let is_tty = crossterm::tty::IsTty::is_tty(&std::io::stdout()) && 
-                 crossterm::tty::IsTty::is_tty(&std::io::stdin());
-    
-    if is_tty {
+    if crossterm::tty::IsTty::is_tty(&std::io::stdout()) {
         crossterm::terminal::enable_raw_mode()?;
         let mut stdout = std::io::stdout();
         crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen)?;
         let backend = ratatui::backend::CrosstermBackend::new(stdout);
         let mut terminal = ratatui::Terminal::new(backend)?;
 
-        let picker = ratatui_image::picker::Picker::from_query_stdio().ok();
+        // Quiet graphics detection
+        let picker = if std::env::var("TERM").map(|t| t == "dumb").unwrap_or(false) {
+            None
+        } else {
+            let term_program = std::env::var("TERM_PROGRAM").unwrap_or_default();
+            let has_graphics_env = term_program.contains("iTerm") || 
+                                 term_program.contains("Ghostty") || 
+                                 std::env::var("KITTY_WINDOW_ID").is_ok();
+            
+            if has_graphics_env {
+                ratatui_image::picker::Picker::from_query_stdio().ok()
+            } else {
+                Some(ratatui_image::picker::Picker::halfblocks())
+            }
+        };
 
         let mut ui_state = dashboard::DashboardState {
             scroll_offset: 0,
@@ -163,26 +177,17 @@ async fn main() -> anyhow::Result<()> {
             image_state: None,
         };
 
-        use tokio_stream::StreamExt;
         let mut event_reader = crossterm::event::EventStream::new();
-
         loop {
-            terminal.draw(|f| dashboard::render(f, &app_state, &mut ui_state))?;
-
+            terminal.draw(|f| dashboard::render(f, &app_state.stats, &mut ui_state))?;
             tokio::select! {
                 event = event_reader.next() => {
                     if let Some(Ok(crossterm::event::Event::Key(key))) = event {
                         if key.kind == crossterm::event::KeyEventKind::Press {
                             match key.code {
                                 crossterm::event::KeyCode::Char('q') | crossterm::event::KeyCode::Char('Q') => break,
-                                crossterm::event::KeyCode::Up => {
-                                    ui_state.scroll_offset += 1;
-                                }
-                                crossterm::event::KeyCode::Down => {
-                                    if ui_state.scroll_offset > 0 {
-                                        ui_state.scroll_offset -= 1;
-                                    }
-                                }
+                                crossterm::event::KeyCode::Up => { ui_state.scroll_offset += 1; }
+                                crossterm::event::KeyCode::Down => { if ui_state.scroll_offset > 0 { ui_state.scroll_offset -= 1; } }
                                 _ => {}
                             }
                         }
@@ -191,49 +196,18 @@ async fn main() -> anyhow::Result<()> {
                 _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {}
             }
         }
-
         crossterm::terminal::disable_raw_mode()?;
-        crossterm::execute!(
-            terminal.backend_mut(),
-            crossterm::terminal::LeaveAlternateScreen
-        )?;
+        crossterm::execute!(terminal.backend_mut(), crossterm::terminal::LeaveAlternateScreen)?;
         terminal.show_cursor()?;
     } else {
-        println!("User defined path: {}", app_state.root_path.display());
-        println!("Security Check: SANDBOX ENABLED 🔒");
-        println!();
-        let protocol = if cli.https { "https" } else { "http" };
-        println!("Air is serving at:");
-        println!("  ➜  Network: {}://{}:{}", protocol, lan_ip, used_port);
-        if let Some(ref h) = host_name {
-            println!("  ➜  Host:    {}://{}:{}", protocol, h, used_port);
-        }
-        println!();
-        println!("Non-interactive mode: Waiting for signal (Ctrl-C) to stop...");
-        
         tokio::signal::ctrl_c().await?;
     }
 
-    // 6. Explicitly unregister and wait a bit for the Goodbye packet to fly
-    println!("Stopping service discovery...");
-    _mdns_daemon.unregister(&fullname)?;
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let _ = discovery_manager.unregister_service(&fullname);
+    println!("\nSummary of this session:");
+    println!("  ➜  Files downloaded: {}", app_state.stats.total_files.load(std::sync::atomic::Ordering::Relaxed));
+    println!("  ➜  Total volume:    {}", view::format_size(app_state.stats.total_bytes.load(std::sync::atomic::Ordering::Relaxed)));
+    println!("  ➜  Total uptime:    {}", view::format_duration(app_state.stats.start_time.elapsed()));
 
-    // 7. Print Summary
-    println!();
-    println!("Summary of this session:");
-    println!(
-        "  ➜  Files downloaded: {}",
-        app_state.stats.total_files.load(std::sync::atomic::Ordering::Relaxed)
-    );
-    println!(
-        "  ➜  Total volume:    {}",
-        view::format_size(app_state.stats.total_bytes.load(std::sync::atomic::Ordering::Relaxed))
-    );
-    println!(
-        "  ➜  Total uptime:    {}",
-        view::format_duration(app_state.stats.start_time.elapsed())
-    );
-
-    std::process::exit(0);
+    Ok(())
 }
