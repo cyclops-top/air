@@ -1,81 +1,126 @@
 use serde::{Deserialize, Serialize};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket as StdUdpSocket};
-use std::time::Duration;
-use tokio::time::sleep;
-use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+use std::net::{IpAddr, Ipv4Addr};
+use mdns_sd::{ServiceDaemon, ServiceInfo, ServiceEvent};
 
-pub const DISCOVERY_PORTS: [u16; 3] = [29888, 29889, 29890];
-const BROADCAST_INTERVAL: Duration = Duration::from_secs(3);
+pub const SERVICE_TYPE: &str = "_air-share._tcp.local.";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DiscoveryMsg {
+    pub id: String,         // Maps to fullname
     pub name: String,
     pub ip: IpAddr,
     pub port: u16,
     pub scheme: String,
+    pub is_online: bool,
 }
 
-/// Starts a background task that broadcasts the service presence.
-pub async fn start_broadcast(msg: DiscoveryMsg) {
-    tokio::spawn(async move {
-        // We use a regular std::net::UdpSocket for broadcasting as it's simpler for this use case
-        let socket = StdUdpSocket::bind("0.0.0.0:0").expect("Failed to bind UDP socket for broadcasting");
-        socket.set_broadcast(true).expect("Failed to set broadcast on UDP socket");
+/// Registers the service and returns the daemon and the fullname.
+pub fn register_service(msg: &DiscoveryMsg) -> anyhow::Result<(ServiceDaemon, String)> {
+    let mdns = ServiceDaemon::new()?;
+    
+    let service_type = SERVICE_TYPE;
+    let instance_name = &msg.name;
+    let host_name = format!("{}.local.", msg.name.replace(' ', "-"));
+    let port = msg.port;
+    
+    let properties = [
+        ("id", msg.id.as_str()),
+        ("scheme", msg.scheme.as_str()),
+        ("ver", "1.0"),
+    ];
 
-        loop {
-            let payload = serde_json::to_vec(&msg).expect("Failed to serialize discovery message");
-            for port in DISCOVERY_PORTS {
-                let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::BROADCAST), port);
-                let _ = socket.send_to(&payload, addr);
+    let service_info = ServiceInfo::new(
+        service_type,
+        instance_name,
+        &host_name,
+        msg.ip,
+        port,
+        &properties[..],
+    )?;
+
+    let fullname = service_info.get_fullname().to_string();
+    mdns.register(service_info)?;
+    
+    Ok((mdns, fullname))
+}
+
+/// Continuously listens for mDNS services and sends updates through a channel.
+pub async fn listen_discovery(
+    tx: tokio::sync::mpsc::Sender<DiscoveryMsg>,
+    mut shutdown_rx: tokio::sync::oneshot::Receiver<()>, 
+) -> anyhow::Result<()> {
+    let mdns = ServiceDaemon::new()?;
+    let receiver = mdns.browse(SERVICE_TYPE)?;
+    
+    // Bridge to convert blocking recv to async
+    let (bridge_tx, mut bridge_rx) = tokio::sync::mpsc::channel::<ServiceEvent>(100);
+
+    std::thread::spawn(move || {
+        while let Ok(event) = receiver.recv() {
+            if bridge_tx.blocking_send(event).is_err() {
+                break;
             }
-            sleep(BROADCAST_INTERVAL).await;
         }
     });
-}
 
-/// Continuously listens for discovery messages and sends updates through a channel.
-pub async fn listen_discovery(tx: tokio::sync::mpsc::Sender<DiscoveryMsg>) -> anyhow::Result<()> {
-    let mut sockets = Vec::new();
-    for &port in &DISCOVERY_PORTS {
-        if let Ok(socket) = create_discovery_socket(port) {
-            socket.set_nonblocking(true)?;
-            let tokio_socket = tokio::net::UdpSocket::from_std(socket.into())?;
-            sockets.push(tokio_socket);
-        }
-    }
-
-    if sockets.is_empty() {
-        return Err(anyhow::anyhow!("Failed to bind to any discovery ports"));
-    }
-
-    let mut buf = [0u8; 1024];
     loop {
-        for socket in &sockets {
-            while let Ok((len, _addr)) = socket.try_recv_from(&mut buf) {
-                if let Ok(msg) = serde_json::from_slice::<DiscoveryMsg>(&buf[..len]) {
-                    let _ = tx.send(msg).await;
+        tokio::select! {
+            _ = &mut shutdown_rx => break,
+            event_opt = bridge_rx.recv() => {
+                let event = match event_opt {
+                    Some(e) => e,
+                    None => break,
+                };
+                
+                match event {
+                    ServiceEvent::ServiceResolved(info) => {
+                        let fullname = info.get_fullname().to_string();
+                        let scheme = info.get_property_val_str("scheme").unwrap_or("http").to_string();
+                        let name = fullname.split('.')
+                            .next()
+                            .unwrap_or(&fullname)
+                            .replace('\\', "")
+                            .to_string();
+                        
+                        let ip_scoped = info.get_addresses().iter()
+                            .find(|ip| ip.is_ipv4())
+                            .or_else(|| info.get_addresses().iter().next())
+                            .cloned();
+                        
+                        let ip: IpAddr = match ip_scoped {
+                            Some(scoped) => scoped.to_string().parse().unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+                            None => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                        };
+
+                        let msg = DiscoveryMsg {
+                            id: fullname,
+                            name,
+                            ip,
+                            port: info.get_port(),
+                            scheme,
+                            is_online: true,
+                        };
+                        let _ = tx.send(msg).await;
+                    }
+                    ServiceEvent::ServiceRemoved(_service_type, fullname) => {
+                        let msg = DiscoveryMsg {
+                            id: fullname.clone(),
+                            name: "".to_string(),
+                            ip: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                            port: 0,
+                            scheme: "".to_string(),
+                            is_online: false,
+                        };
+                        let _ = tx.send(msg).await;
+                    }
+                    _ => {}
                 }
             }
         }
-        sleep(Duration::from_millis(100)).await;
     }
-}
-
-fn create_discovery_socket(port: u16) -> anyhow::Result<Socket> {
-    let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
     
-    // SO_REUSEADDR and SO_REUSEPORT are essential for multiple instances to listen on the same discovery port.
-    // On Windows, SO_REUSEADDR has different semantics, and SO_REUSEPORT is not available.
-    #[cfg(not(windows))]
-    socket.set_reuse_address(true)?;
-    
-    #[cfg(all(unix, not(target_os = "solaris"), not(target_os = "illumos")))]
-    let _ = socket.set_reuse_port(true); // Ignore error if not supported
-    
-    let addr: SockAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port).into();
-    socket.bind(&addr)?;
-    
-    Ok(socket)
+    let _ = mdns.stop_browse(SERVICE_TYPE);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -85,16 +130,16 @@ mod tests {
     #[test]
     fn test_discovery_msg_serialization() {
         let msg = DiscoveryMsg {
+            id: "test.air.local.".to_string(),
             name: "test-node".to_string(),
             ip: "192.168.1.100".parse().unwrap(),
             port: 8080,
             scheme: "http".to_string(),
+            is_online: true,
         };
         let serialized = serde_json::to_string(&msg).unwrap();
         let deserialized: DiscoveryMsg = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(msg.name, deserialized.name);
-        assert_eq!(msg.ip, deserialized.ip);
-        assert_eq!(msg.port, deserialized.port);
-        assert_eq!(msg.scheme, deserialized.scheme);
+        assert_eq!(msg.id, deserialized.id);
+        assert_eq!(msg.is_online, deserialized.is_online);
     }
 }

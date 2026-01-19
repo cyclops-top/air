@@ -7,7 +7,6 @@ use ratatui::{
 };
 use crate::discovery::DiscoveryMsg;
 use std::collections::HashMap;
-use std::net::IpAddr;
 
 #[derive(Serialize)]
 pub struct FileEntry {
@@ -698,7 +697,7 @@ pub fn format_range(range: &str) -> String {
 pub struct DiscoverUI {
     pub state: ListState,
     pub nodes: Vec<DiscoveryMsg>,
-    pub node_map: HashMap<(IpAddr, u16), DiscoveryMsg>,
+    pub node_map: HashMap<String, DiscoveryMsg>,
 }
 
 impl DiscoverUI {
@@ -711,13 +710,44 @@ impl DiscoverUI {
     }
 
     pub fn update_nodes(&mut self, node: DiscoveryMsg) {
-        let key = (node.ip, node.port);
-        if !self.node_map.contains_key(&key) {
-            self.node_map.insert(key, node.clone());
-            self.nodes.push(node);
-            if self.state.selected().is_none() {
-                self.state.select(Some(0));
+        let selected_id = self.selected_node().map(|n| n.id.clone());
+
+        if !node.is_online {
+            // Remove node if it's offline. 
+            if self.node_map.contains_key(&node.id) {
+                self.node_map.remove(&node.id);
+                self.nodes.retain(|n| n.id != node.id);
             }
+        } else if !self.node_map.contains_key(&node.id) {
+            self.node_map.insert(node.id.clone(), node.clone());
+            self.nodes.push(node);
+        } else {
+            // Update existing node info if needed (e.g. IP changed)
+            if let Some(existing) = self.node_map.get_mut(&node.id) {
+                *existing = node.clone();
+                // Find and update in the list as well
+                if let Some(pos) = self.nodes.iter().position(|n| n.id == node.id) {
+                    self.nodes[pos] = node;
+                }
+            }
+        }
+
+        // Sort nodes by name (case-insensitive)
+        self.nodes.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
+        // Restore or fix selection
+        if let Some(id) = selected_id {
+            if let Some(new_pos) = self.nodes.iter().position(|n| n.id == id) {
+                self.state.select(Some(new_pos));
+            } else if !self.nodes.is_empty() {
+                // Previously selected node is gone, clamp selection
+                let current = self.state.selected().unwrap_or(0);
+                self.state.select(Some(current.min(self.nodes.len() - 1)));
+            } else {
+                self.state.select(None);
+            }
+        } else if !self.nodes.is_empty() && self.state.selected().is_none() {
+            self.state.select(Some(0));
         }
     }
 

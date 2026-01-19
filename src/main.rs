@@ -54,15 +54,14 @@ async fn main() -> anyhow::Result<()> {
 
         let mut ui = view::DiscoverUI::new();
         let (tx, mut rx) = tokio::sync::mpsc::channel(100);
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         
         tokio::spawn(async move {
-            let _ = discovery::listen_discovery(tx).await;
+            let _ = discovery::listen_discovery(tx, shutdown_rx).await;
         });
 
         use tokio_stream::StreamExt;
         let mut event_reader = crossterm::event::EventStream::new();
-
-        let mut selected_url = None;
 
         loop {
             terminal.draw(|f| view::render_discover(f, &mut ui))?;
@@ -80,8 +79,15 @@ async fn main() -> anyhow::Result<()> {
                                 crossterm::event::KeyCode::Down => ui.next(),
                                 crossterm::event::KeyCode::Enter => {
                                     if let Some(node) = ui.selected_node() {
-                                        selected_url = Some(format!("{}://{}:{}", node.scheme, node.ip, node.port));
-                                        break;
+                                        let url = format!("{}://{}:{}", node.scheme, node.ip, node.port);
+                                        #[cfg(target_os = "macos")]
+                                        let _ = std::process::Command::new("open").arg(&url).spawn();
+                                        #[cfg(target_os = "linux")]
+                                        let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+                                        #[cfg(target_os = "android")]
+                                        let _ = std::process::Command::new("am").args(["start", "-a", "android.intent.action.VIEW", "-d", &url]).spawn();
+                                        #[cfg(target_os = "windows")]
+                                        let _ = std::process::Command::new("cmd").args(["/C", "start", &url]).spawn();
                                     }
                                 }
                                 _ => {}
@@ -93,6 +99,8 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
+        let _ = shutdown_tx.send(());
+
         crossterm::terminal::disable_raw_mode()?;
         crossterm::execute!(
             terminal.backend_mut(),
@@ -100,19 +108,7 @@ async fn main() -> anyhow::Result<()> {
         )?;
         terminal.show_cursor()?;
 
-        if let Some(url) = selected_url {
-            println!("Opening: {}", url);
-            #[cfg(target_os = "macos")]
-            let _ = std::process::Command::new("open").arg(&url).spawn();
-            #[cfg(target_os = "linux")]
-            let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
-            #[cfg(target_os = "android")]
-            let _ = std::process::Command::new("am").args(["start", "-a", "android.intent.action.VIEW", "-d", &url]).spawn();
-            #[cfg(target_os = "windows")]
-            let _ = std::process::Command::new("cmd").args(["/C", "start", &url]).spawn();
-        }
-
-        return Ok(());
+        std::process::exit(0);
     }
 
     // 1. Resolve absolute path
@@ -132,13 +128,18 @@ async fn main() -> anyhow::Result<()> {
     let (app_state, used_port) = server::start(cli.port, root_path, cli.https, lan_ip).await?;
 
     // 4. Start discovery broadcast
+    let instance_id = rand::random::<u32>().to_string();
     let discovery_msg = discovery::DiscoveryMsg {
+        id: instance_id,
         name: host_name.clone().unwrap_or_else(|| "Unknown".to_string()),
         ip: lan_ip,
         port: used_port,
         scheme: if cli.https { "https".to_string() } else { "http".to_string() },
+        is_online: true,
     };
-    discovery::start_broadcast(discovery_msg).await;
+    
+    // Hold the daemon and the fullname for cleanup
+    let (_mdns_daemon, fullname) = discovery::register_service(&discovery_msg)?;
 
     // 5. Setup TUI (only if TTY)
     let is_tty = crossterm::tty::IsTty::is_tty(&std::io::stdout()) && 
@@ -187,13 +188,10 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
                 }
-                _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {
-                    // Periodic refresh
-                }
+                _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {}
             }
         }
 
-        // 5. Cleanup TUI
         crossterm::terminal::disable_raw_mode()?;
         crossterm::execute!(
             terminal.backend_mut(),
@@ -216,7 +214,12 @@ async fn main() -> anyhow::Result<()> {
         tokio::signal::ctrl_c().await?;
     }
 
-    // 6. Print Summary
+    // 6. Explicitly unregister and wait a bit for the Goodbye packet to fly
+    println!("Stopping service discovery...");
+    _mdns_daemon.unregister(&fullname)?;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    // 7. Print Summary
     println!();
     println!("Summary of this session:");
     println!(
@@ -232,5 +235,5 @@ async fn main() -> anyhow::Result<()> {
         view::format_duration(app_state.stats.start_time.elapsed())
     );
 
-    Ok(())
+    std::process::exit(0);
 }
