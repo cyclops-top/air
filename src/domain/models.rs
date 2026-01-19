@@ -13,6 +13,7 @@ pub struct DiscoveryMsg {
     pub ip: IpAddr,
     pub port: u16,
     pub scheme: String,
+    #[serde(rename = "isOnline")]
     pub is_online: bool,
 }
 
@@ -22,13 +23,18 @@ pub struct FileEntry {
     #[serde(rename = "isDir")]
     pub is_dir: bool,
     pub size: u64,
+    #[serde(rename = "modTime")]
     pub mod_time: String,
+    #[serde(rename = "mediaType")]
+    pub media_type: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DirectoryListing {
+    #[serde(rename = "currentPath")]
     pub current_path: String,
     pub items: Vec<FileEntry>,
+    #[serde(rename = "lanIp")]
     pub lan_ip: String,
     pub port: u16,
 }

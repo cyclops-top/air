@@ -42,7 +42,13 @@ impl FileRepository for LocalFileRepository {
                 }).unwrap_or_default()
             } else { "".to_string() };
 
-            items.push(FileEntry { name, is_dir, size, mod_time });
+            let media_type = if is_dir {
+                "directory".to_string()
+            } else {
+                mime_guess::from_path(&name).first_or_octet_stream().to_string()
+            };
+
+            items.push(FileEntry { name, is_dir, size, mod_time, media_type });
         }
 
         items.sort_by(|a, b| {

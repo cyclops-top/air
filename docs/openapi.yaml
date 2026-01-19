@@ -1,0 +1,138 @@
+openapi: 3.0.3
+info:
+  title: AIR - Cloud Explorer API
+  description: |
+    Dedicated JSON API for the AIR local file sharing service. 
+    All response fields follow the camelCase naming convention.
+  version: 1.2.2
+servers:
+  - url: http://{lan_ip}:{port}/api
+    variables:
+      lan_ip:
+        default: 127.0.0.1
+      port:
+        default: "9567"
+
+paths:
+  /list/:
+    get:
+      summary: List root directory
+      description: Returns the directory listing for the shared root path in standardized camelCase JSON.
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DirectoryListing'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /list/{path}:
+    get:
+      summary: List subdirectory
+      description: Returns the directory listing for a specific subdirectory.
+      parameters:
+        - name: path
+          in: path
+          description: URL-encoded relative path to the directory.
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DirectoryListing'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+components:
+  schemas:
+    DirectoryListing:
+      type: object
+      properties:
+        currentPath:
+          type: string
+          example: "/air/Documents"
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FileEntry'
+        lanIp:
+          type: string
+          example: "192.168.1.100"
+        port:
+          type: integer
+          example: 9567
+    
+    FileEntry:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "vacation_photo.jpg"
+        isDir:
+          type: boolean
+          example: false
+        size:
+          type: integer
+          format: int64
+          example: 2048576
+        modTime:
+          type: string
+          format: date-time
+          example: "2026-01-19T14:30:00Z"
+        mediaType:
+          type: string
+          example: "image/jpeg"
+
+    DiscoveryMsg:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        ip:
+          type: string
+        port:
+          type: integer
+        scheme:
+          type: string
+        isOnline:
+          type: boolean
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        code:
+          type: integer
+
+  responses:
+    Forbidden:
+      description: Access denied due to path sanitization rules.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: The specified directory was not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ServerError:
+      description: Internal server error while reading filesystem.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'

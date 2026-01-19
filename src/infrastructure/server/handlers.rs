@@ -24,7 +24,26 @@ pub async fn handle_request(
     req: Request,
 ) -> Response {
     let uri_path = req.uri().path().to_string();
-    let decoded_path = match percent_decode_str(&uri_path).decode_utf8() {
+
+    // 1. Handle root redirection
+    if uri_path == "/" {
+        return axum::response::Redirect::temporary("/air/").into_response();
+    }
+
+    // 2. Validate prefix
+    if !uri_path.starts_with("/air/") && uri_path != "/air" {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    // Normalize /air to /air/
+    if uri_path == "/air" {
+        return axum::response::Redirect::permanent("/air/").into_response();
+    }
+
+    // 3. Strip prefix for internal processing
+    let internal_path = &uri_path[4..]; // Strip "/air"
+
+    let decoded_path = match percent_decode_str(internal_path).decode_utf8() {
         Ok(p) => p.to_string(),
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
     };
@@ -51,7 +70,7 @@ pub async fn handle_request(
             return axum::response::Redirect::permanent(&format!("{}/", uri_path)).into_response();
         }
 
-        match state.file_service.get_listing(&decoded_path, &abs_path).await {
+        match state.file_service.get_listing(&uri_path, &abs_path).await {
             Ok(listing) => {
                 let accept = headers.get(header::ACCEPT).and_then(|v| v.to_str().ok()).unwrap_or("");
                 let mut res = if accept.contains("application/json") {

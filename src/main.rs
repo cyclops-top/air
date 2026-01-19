@@ -46,16 +46,16 @@ enum Commands {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    // 1. Initialize Infrastructure
+    // 1. 初始化基础设施
     let mmap_cache = Arc::new(MmapCache::new());
     let file_repo = Arc::new(LocalFileRepository::new(mmap_cache));
     let discovery_provider = Arc::new(MdnsDiscoveryProvider::new()?);
     let ui_renderer = Arc::new(HtmlRenderer::new());
 
-    // 2. Initialize Application Services
+    // 2. 初始化应用层服务
     let discovery_manager = Arc::new(DiscoveryManager::new(discovery_provider));
 
-    // --- Discover Mode ---
+    // --- Discover 模式 ---
     if let Some(Commands::Discover { .. }) = cli.command {
         crossterm::terminal::enable_raw_mode()?;
         let mut stdout = std::io::stdout();
@@ -105,7 +105,7 @@ async fn main() -> anyhow::Result<()> {
         std::process::exit(0);
     }
 
-    // --- Share Mode ---
+    // --- Share 模式 ---
     let root_path = std::fs::canonicalize(&cli.path).unwrap_or_else(|e| {
         eprintln!("Error: Cannot access path: {}", e);
         std::process::exit(1);
@@ -119,12 +119,12 @@ async fn main() -> anyhow::Result<()> {
         stats: Arc::new(Stats::default()),
         enable_https: cli.https,
         lan_ip: lan_ip.to_string(),
-        port: 0,
+        port: 0, // Placeholder
     });
 
     let file_service = Arc::new(FileService::new(file_repo, app_state.clone()));
 
-    // Start Start start_server
+    // 启动服务器
     let used_port = start_server(
         cli.port,
         root_path,
@@ -135,6 +135,7 @@ async fn main() -> anyhow::Result<()> {
         app_state.clone()
     ).await?;
 
+    // 注册 mDNS
     let discovery_msg = domain::models::DiscoveryMsg {
         id: rand::random::<u32>().to_string(),
         name: host_name.clone().unwrap_or_else(|| "Unknown".to_string()),
@@ -152,20 +153,11 @@ async fn main() -> anyhow::Result<()> {
         let backend = ratatui::backend::CrosstermBackend::new(stdout);
         let mut terminal = ratatui::Terminal::new(backend)?;
 
-        // Quiet graphics detection
+        // 使用标准探测方式，10.x 版本通常能自动处理 iTerm2
         let picker = if std::env::var("TERM").map(|t| t == "dumb").unwrap_or(false) {
             None
         } else {
-            let term_program = std::env::var("TERM_PROGRAM").unwrap_or_default();
-            let has_graphics_env = term_program.contains("iTerm") || 
-                                 term_program.contains("Ghostty") || 
-                                 std::env::var("KITTY_WINDOW_ID").is_ok();
-            
-            if has_graphics_env {
-                ratatui_image::picker::Picker::from_query_stdio().ok()
-            } else {
-                Some(ratatui_image::picker::Picker::halfblocks())
-            }
+            ratatui_image::picker::Picker::from_query_stdio().ok()
         };
 
         let mut ui_state = dashboard::DashboardState {

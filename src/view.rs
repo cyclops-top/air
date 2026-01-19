@@ -14,6 +14,7 @@ pub fn render_html_domain(listing: &domain_models::DirectoryListing) -> String {
         is_dir: i.is_dir,
         size: i.size,
         mod_time: i.mod_time.clone(),
+        media_type: i.media_type.clone(),
     }).collect();
 
     let view_listing = DirectoryListing {
@@ -33,6 +34,8 @@ pub struct FileEntry {
     pub size: u64,
     #[serde(rename = "modTime")]
     pub mod_time: String,
+    #[serde(rename = "mediaType")]
+    pub media_type: String,
 }
 
 #[derive(Serialize)]
@@ -318,11 +321,14 @@ fn get_dynamic_style_details(name: &str, is_dir: bool) -> (&'static str, String,
 
 fn render_adaptive_breadcrumbs(path: &str) -> String {
     let mut html = String::new();
-    let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    html.push_str("<a href='/' style='display:flex; align-items:center; gap:0.4rem; color:#64748b; font-weight:600;'>");
+    // Breadcrumbs should start from /air/
+    let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty() && *s != "air").collect();
+    
+    html.push_str("<a href='/air/' style='display:flex; align-items:center; gap:0.4rem; color:#64748b; font-weight:600;'>");
     html.push_str(&get_icon_svg("home", "width:14px; height:14px;", "currentColor"));
     html.push_str("AIR</a>");
-    let mut acc = String::from("");
+    
+    let mut acc = String::from("/air");
     for (i, p) in parts.iter().enumerate() {
         acc.push('/'); acc.push_str(p);
         html.push_str("<span style='opacity:var(--breadcrumb-sep); margin:0 0.4rem; display:flex; align-items:center;'>");
