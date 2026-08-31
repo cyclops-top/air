@@ -8,6 +8,17 @@ use ratatui::{
 use crate::domain::models as domain_models;
 use std::collections::HashMap;
 
+use percent_encoding::{utf8_percent_encode, percent_decode_str, AsciiSet, CONTROLS};
+
+// Don't encode underscore, hyphen, period, space, and parentheses in filenames
+const FILENAME_CHARSET: &AsciiSet = &CONTROLS
+    .add(b'_')
+    .add(b'-')
+    .add(b'.')
+    .add(b' ')
+    .add(b'(')
+    .add(b')');
+
 pub fn render_html_domain(listing: &domain_models::DirectoryListing) -> String {
     let items = listing.items.iter().map(|i| FileEntry {
         name: i.name.clone(),
@@ -240,7 +251,8 @@ pub fn render_html(listing: &DirectoryListing) -> String {
 
     for item in &listing.items {
         let (icon, color_bg, hex) = get_dynamic_style_details(&item.name, item.is_dir);
-        let href = if item.is_dir { format!("{}/", item.name) } else { item.name.clone() };
+        let encoded_name = utf8_percent_encode(&item.name, FILENAME_CHARSET).to_string();
+        let href = if item.is_dir { format!("{}/", encoded_name) } else { encoded_name };
         let size_str = if item.is_dir { "".to_string() } else { format_size(item.size) };
         let date = if item.mod_time.len() >= 10 { item.mod_time[5..10].replace('-', ".") } else { "".to_string() };
         let time = if item.mod_time.len() >= 16 { &item.mod_time[11..16] } else { "" };
@@ -274,18 +286,18 @@ pub fn render_html(listing: &DirectoryListing) -> String {
         html.push_str("<div class='col-pc-action'>");
         if !item.is_dir {
             html.push_str(&format!("<a href='{href}' download class='glass-button rounded-full' style='width:2.75rem; height:2.75rem; color:#007AFF; box-shadow:0 2px 5px rgba(0,0,0,0.05);'>"));
-            html.push_str(&get_icon_svg("download", "width:20px; height:20px;", "currentColor"));
+            html.push_str(&get_icon_svg("download", "width:20px; height:20px; pointer-events:none;", "currentColor"));
             html.push_str("</a>");
         } else {
             html.push_str(&format!("<a href='{href}' class='glass-button rounded-full' style='width:2.75rem; height:2.75rem; opacity:0.4;'>"));
-            html.push_str(&get_icon_svg("chevron_right", "width:18px; height:18px;", "currentColor"));
+            html.push_str(&get_icon_svg("chevron_right", "width:18px; height:18px; pointer-events:none;", "currentColor"));
             html.push_str("</a>");
         }
         html.push_str("</div></div>");
     }
 
     html.push_str("<div style='height:5rem;'></div>");
-    html.push_str("</div></section></div></main></div></body></html>");
+    html.push_str("</div></section></div></div></body></html>");
     html
 }
 
@@ -331,13 +343,15 @@ fn render_adaptive_breadcrumbs(path: &str) -> String {
     let mut acc = String::from("/air");
     for (i, p) in parts.iter().enumerate() {
         acc.push('/'); acc.push_str(p);
+        // URL 路径是 percent-encoded 的，展示时解码还原真实文件名（如中文）
+        let display = percent_decode_str(p).decode_utf8().map(|c| c.into_owned()).unwrap_or_else(|_| p.to_string());
         html.push_str("<span style='opacity:var(--breadcrumb-sep); margin:0 0.4rem; display:flex; align-items:center;'>");
         html.push_str(&get_icon_svg("chevron_right", "width:12px; height:12px;", "currentColor"));
         html.push_str("</span>");
         if i == parts.len() - 1 {
-            html.push_str(&format!("<span style='color:#007AFF; font-weight:800; background:var(--breadcrumb-active-bg); padding:0.25rem 0.625rem; border-radius:8px;'>{}</span>", p));
+            html.push_str(&format!("<span style='color:#007AFF; font-weight:800; background:var(--breadcrumb-active-bg); padding:0.25rem 0.625rem; border-radius:8px;'>{}</span>", display));
         } else {
-            html.push_str(&format!("<a href='{acc}/' style='font-weight:600; color:#64748b;'>{p}</a>"));
+            html.push_str(&format!("<a href='{acc}/' style='font-weight:600; color:#64748b;'>{}</a>", display));
         }
     }
     html
@@ -402,4 +416,27 @@ pub fn render_discover(f: &mut Frame, ui: &mut DiscoverUI) {
 mod tests {
     use super::*;
     #[test] fn test_format_duration() { assert_eq!(format_duration(std::time::Duration::from_secs(3661)), "01:01:01"); }
+
+    #[test]
+    fn test_render_breadcrumbs_decodes_percent_encoding() {
+        // URL 路径中的中文是 percent-encoded 的，面包屑应解码后展示
+        let html = render_adaptive_breadcrumbs("/air/export-%E6%95%B0%E5%AD%A6/high-%E9%AB%98%E4%B8%AD");
+        assert!(html.contains("export-数学"));
+        assert!(html.contains("high-高中"));
+        // href 保留编码形式，浏览器才能正确请求
+        assert!(html.contains("href='/air/export-%E6%95%B0%E5%AD%A6/'"));
+    }
+
+    #[test]
+    fn test_render_breadcrumbs_ascii_unchanged() {
+        let html = render_adaptive_breadcrumbs("/air/docs");
+        assert!(html.contains("docs"));
+    }
+
+    #[test]
+    fn test_render_breadcrumbs_encoded_hyphen_and_utf8() {
+        // 用户报告的真实场景：连字符和中文都做了 percent-encoding
+        let html = render_adaptive_breadcrumbs("/air/export%2D%E6%95%B0%E5%AD%A6%2D%E9%AB%98%E4%B8%AD%2DB");
+        assert!(html.contains("export-数学-高中-B"));
+    }
 }

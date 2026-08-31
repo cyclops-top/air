@@ -32,6 +32,7 @@ memmap2 = "0.9"
 mime_guess = "2.0"
 mdns-sd = "0.17"
 async-trait = "0.1"
+tokio-util = { version = "0.7.18", features = ["io"] }
 
 [dev-dependencies]
 tempfile = "3.24.0"

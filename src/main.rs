@@ -46,9 +46,9 @@ enum Commands {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    // 1. 初始化基础设施
-    let mmap_cache = Arc::new(MmapCache::new());
-    let file_repo = Arc::new(LocalFileRepository::new(mmap_cache));
+    // 1. Initialize Infrastructure
+    let _mmap_cache = Arc::new(MmapCache::new()); // Keep for compatibility if needed, but repo doesn't use it
+    let file_repo = Arc::new(LocalFileRepository::new());
     let discovery_provider = Arc::new(MdnsDiscoveryProvider::new()?);
     let ui_renderer = Arc::new(HtmlRenderer::new());
 
@@ -164,7 +164,6 @@ async fn main() -> anyhow::Result<()> {
             scroll_offset: 0,
             lan_ip: lan_ip.to_string(),
             port: used_port,
-            hostname: host_name,
             picker,
             image_state: None,
         };

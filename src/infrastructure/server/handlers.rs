@@ -7,6 +7,7 @@ use axum::{
 use std::sync::Arc;
 use std::ops::Range;
 use percent_encoding::percent_decode_str;
+use tokio_util::io::ReaderStream;
 use crate::application::file_service::FileService;
 use crate::domain::models::{AppState, LogAction};
 use crate::domain::traits::UiRenderer;
@@ -41,7 +42,7 @@ pub async fn handle_request(
     }
 
     // 3. Strip prefix for internal processing
-    let internal_path = &uri_path[4..]; // Strip "/air"
+    let internal_path = &uri_path[4..];
 
     let decoded_path = match percent_decode_str(internal_path).decode_utf8() {
         Ok(p) => p.to_string(),
@@ -84,12 +85,12 @@ pub async fn handle_request(
             Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         }
     } else {
-        let file_size = metadata.len() as usize;
+        let file_size = metadata.len();
         let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
         let range = range_header.and_then(|h| parse_range(h, file_size));
 
         match state.file_service.get_file_content(&abs_path, range.clone()).await {
-            Ok((bytes, hash)) => {
+            Ok((stream, length, hash)) => {
                 let etag = format!("\"{}\"", hash);
                 if let Some(if_none_match) = headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) {
                     if if_none_match == etag {
@@ -97,21 +98,33 @@ pub async fn handle_request(
                     }
                 }
 
+                // 转换为 Axum Body
+                let body = Body::from_stream(ReaderStream::new(stream));
+
                 let mut res = if let Some(r) = range {
-                    let mut response = (StatusCode::PARTIAL_CONTENT, Body::from(bytes)).into_response();
+                    let mut response = (StatusCode::PARTIAL_CONTENT, body).into_response();
                     response.headers_mut().insert(
                         header::CONTENT_RANGE,
                         header::HeaderValue::from_str(&format!("bytes {}-{}/{}", r.start, r.end - 1, file_size)).unwrap(),
                     );
                     response
                 } else {
-                    (StatusCode::OK, Body::from(bytes)).into_response()
+                    (StatusCode::OK, body).into_response()
                 };
 
                 let mime = mime_guess::from_path(&abs_path).first_or_octet_stream();
                 res.headers_mut().insert(header::CONTENT_TYPE, mime.as_ref().parse().unwrap());
                 res.headers_mut().insert(header::ACCEPT_RANGES, "bytes".parse().unwrap());
                 res.headers_mut().insert(header::ETAG, etag.parse().unwrap());
+                res.headers_mut().insert(header::CONTENT_LENGTH, length.into());
+
+                if let Some(filename) = abs_path.file_name().and_then(|n| n.to_str()) {
+                    let disposition = format!("attachment; filename=\"{}\"", filename);
+                    if let Ok(value) = header::HeaderValue::from_str(&disposition) {
+                        res.headers_mut().insert(header::CONTENT_DISPOSITION, value);
+                    }
+                }
+
                 res.extensions_mut().insert(LogAction::DownloadFile);
                 res
             }
@@ -120,13 +133,13 @@ pub async fn handle_request(
     }
 }
 
-fn parse_range(range_header: &str, file_size: usize) -> Option<Range<usize>> {
+fn parse_range(range_header: &str, file_size: u64) -> Option<Range<u64>> {
     if !range_header.starts_with("bytes=") { return None; }
     let range_str = &range_header[6..];
     let parts: Vec<&str> = range_str.split('-').collect();
     if parts.len() != 2 { return None; }
-    let start = parts[0].parse::<usize>().ok();
-    let end = parts[1].parse::<usize>().ok();
+    let start = parts[0].parse::<u64>().ok();
+    let end = parts[1].parse::<u64>().ok();
     match (start, end) {
         (Some(s), Some(e)) => if s <= e && e < file_size { Some(s..e + 1) } else { None },
         (Some(s), None) => if s < file_size { Some(s..file_size) } else { None },

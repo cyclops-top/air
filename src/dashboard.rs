@@ -15,7 +15,6 @@ pub struct DashboardState {
     pub scroll_offset: usize,
     pub lan_ip: String,
     pub port: u16,
-    pub hostname: Option<String>,
     pub picker: Option<ratatui_image::picker::Picker>,
     pub image_state: Option<Box<dyn std::any::Any>>,
 }

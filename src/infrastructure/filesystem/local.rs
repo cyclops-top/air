@@ -1,22 +1,19 @@
 use async_trait::async_trait;
 use crate::domain::models::{FileEntry, DigestEntry};
-use crate::domain::traits::FileRepository;
+use crate::domain::traits::{FileRepository, FileStream};
 use crate::fs_utils;
-use bytes::Bytes;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Weak};
-use memmap2::Mmap;
 use dashmap::DashMap;
+use tokio::fs::File;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 pub struct LocalFileRepository {
-    pub mmap_cache: Arc<MmapCache>,
     pub digest_cache: DashMap<PathBuf, DigestEntry>,
 }
 
 impl LocalFileRepository {
-    pub fn new(mmap_cache: Arc<MmapCache>) -> Self {
+    pub fn new() -> Self {
         Self {
-            mmap_cache,
             digest_cache: DashMap::new(),
         }
     }
@@ -60,12 +57,19 @@ impl FileRepository for LocalFileRepository {
         Ok(items)
     }
 
-    async fn get_file_content(&self, abs_path: &Path, range: Option<std::ops::Range<usize>>) -> anyhow::Result<Bytes> {
-        let mapped = self.mmap_cache.get_or_create(abs_path)?;
+    async fn get_file_stream(&self, abs_path: &Path, range: Option<std::ops::Range<u64>>) -> anyhow::Result<(FileStream, u64)> {
+        let mut file = File::open(abs_path).await?;
+        let metadata = file.metadata().await?;
+        let total_size = metadata.len();
+
         if let Some(r) = range {
-            Ok(Bytes::copy_from_slice(&mapped.mmap[r]))
+            file.seek(std::io::SeekFrom::Start(r.start)).await?;
+            // 限制读取长度
+            let length = r.end - r.start;
+            let take = file.take(length);
+            Ok((Box::pin(take), length))
         } else {
-            Ok(Bytes::copy_from_slice(&mapped.mmap[..]))
+            Ok((Box::pin(file), total_size))
         }
     }
 
@@ -73,6 +77,15 @@ impl FileRepository for LocalFileRepository {
         let metadata = std::fs::metadata(abs_path)?;
         let mtime = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
         let size = metadata.len();
+
+        // 策略优化：大文件 (>10MB) 使用弱哈希 (mtime + size)，避免全量读取造成阻塞
+        if size > 10 * 1024 * 1024 {
+            let weak_key = format!("{:?}-{}", mtime, size);
+            // 使用简单的 MD5 或直接字符串作为 ETag
+            // 这里为了性能，直接返回 Base64 编码的元数据标识
+            use base64::{Engine as _, engine::general_purpose};
+            return Ok(general_purpose::URL_SAFE_NO_PAD.encode(weak_key));
+        }
 
         if let Some(entry) = self.digest_cache.get(abs_path) {
             if entry.mtime == mtime && entry.size == size {
@@ -90,27 +103,6 @@ impl FileRepository for LocalFileRepository {
     }
 }
 
-pub struct MappedFile {
-    pub mmap: Mmap,
-    pub path: PathBuf,
-    pub cache: Arc<MmapCache>,
-}
-
-impl Drop for MappedFile { fn drop(&mut self) { self.cache.remove(&self.path); } }
-
-pub struct MmapCache {
-    pub mappings: DashMap<PathBuf, Weak<MappedFile>>,
-}
-
-impl MmapCache {
-    pub fn new() -> Self { Self { mappings: DashMap::new() } }
-    pub fn get_or_create(self: &Arc<Self>, path: &Path) -> std::io::Result<Arc<MappedFile>> {
-        if let Some(weak) = self.mappings.get(path) { if let Some(arc) = weak.upgrade() { return Ok(arc); } }
-        let file = std::fs::File::open(path)?;
-        let mmap = unsafe { Mmap::map(&file)? };
-        let mapped_file = Arc::new(MappedFile { mmap, path: path.to_path_buf(), cache: self.clone() });
-        self.mappings.insert(path.to_path_buf(), Arc::downgrade(&mapped_file));
-        Ok(mapped_file)
-    }
-    fn remove(&self, path: &Path) { if let Some(weak) = self.mappings.get(path) { if weak.upgrade().is_none() { self.mappings.remove(path); } } }
-}
+// 移除不再需要的 MmapCache 结构体
+pub struct MmapCache;
+impl MmapCache { pub fn new() -> Self { Self } }

@@ -48,7 +48,6 @@ pub enum LogAction {
 
 pub struct LogEntry {
     pub time: String,
-    #[allow(dead_code)]
     pub ip: String,
     pub action: LogAction,
     pub duration: Duration,
@@ -84,7 +83,6 @@ pub struct DigestEntry {
 pub struct AppState {
     pub root_path: PathBuf,
     pub stats: std::sync::Arc<Stats>,
-    #[allow(dead_code)]
     pub enable_https: bool,
     pub lan_ip: String,
     pub port: u16,
